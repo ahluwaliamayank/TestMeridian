@@ -29,7 +29,7 @@ from pathlib import Path
 
 CLIENT_EXPORT_RE = re.compile(
     r'export\s+const\s+(\w+)\s*=.*?api\.(get|post|put|patch|delete|GET|POST|PUT|PATCH|DELETE)\s*\(\s*[`\'"](.*?)[`\'"]',
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 
 def parse_api_client(ui_dir: str) -> dict[str, str]:
