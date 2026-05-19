@@ -126,11 +126,34 @@ Given a test scenario in natural language, analyze the dependency graph above an
       "cascades_to": ["other_table"]
     }
   ],
+  "test_data_requirements": {
+    "needs_existing_data": true,
+    "description": "Plain-English description of what data must exist before this scenario can run. If no pre-existing data is required (e.g. a fresh signup flow), set needs_existing_data to false and explain why in description."
+  },
+  "test_cases": [
+    {
+      "type": "positive",
+      "title": "Short imperative title",
+      "description": "What the test verifies and the expected outcome",
+      "test_data": "Concrete description of data required for this specific case, or 'None required' if the case starts from an empty state"
+    },
+    {
+      "type": "negative",
+      "title": "...",
+      "description": "...",
+      "test_data": "..."
+    }
+  ],
   "test_checklist": [
     "Specific thing a QA engineer should verify for this scenario"
   ],
   "risk_notes": "Side effects, race conditions, cascading deletes, or edge cases a tester should watch for"
 }
+
+Guidelines for test_data_requirements and test_cases:
+- Decide needs_existing_data by inspecting api_call_sequence: if the very first call is a READ on a table, the test likely needs that table to be pre-populated; if it starts with a WRITE on an empty-tolerant table, it may not.
+- Provide up to 4 positive and up to 3 negative test cases. Cover the happy path, common variants, and edge cases (empty results, invalid inputs, missing auth, validation failures, concurrent state). Stop once you've exhausted meaningfully different cases — do not pad.
+- For each case's test_data, be specific about table state (e.g. "Two products with stock_qty > 0 and one with stock_qty = 0") so a QA engineer could write a fixture from it. Use "None required" when the case literally starts from an empty database.
 """)
     return "\n".join(lines)
 
@@ -149,7 +172,7 @@ def analyze_scenario(graph: dict, scenario: str) -> dict:
     print(dim("\n  Calling Claude..."), end="", flush=True)
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=2000,
+        max_tokens=3500,
         system=system_prompt,
         messages=[{"role": "user", "content": f"Test scenario: {scenario}"}],
     )
@@ -235,6 +258,34 @@ def print_analysis(result: dict, graph: dict):
         if cascades:
             for c_table in cascades:
                 print(f"  {'   ' if is_last else dim('│  ')}   {dim('↳ cascades to: ')}{yellow(c_table)}")
+
+    # ── Test Data Requirements ────────────────────────────────────────────────
+    tdr = result.get("test_data_requirements") or {}
+    if tdr:
+        print(f"\n{bold(cyan('TEST DATA SETUP'))}")
+        needs = tdr.get("needs_existing_data")
+        label = yellow("PRE-EXISTING DATA REQUIRED") if needs else green("NO PRE-EXISTING DATA NEEDED")
+        print(f"  {label}")
+        desc = tdr.get("description", "")
+        if desc:
+            print(textwrap.fill(desc, width=W, initial_indent="  ", subsequent_indent="  "))
+
+    # ── Test Cases ────────────────────────────────────────────────────────────
+    cases = result.get("test_cases", [])
+    if cases:
+        print(f"\n{bold(cyan('SUGGESTED TEST CASES'))}")
+        for case in cases:
+            ctype = (case.get("type") or "").lower()
+            marker = green("✓ POS") if ctype == "positive" else red("✗ NEG")
+            title = case.get("title", "")
+            print(f"  {marker}  {bold(title)}")
+            desc = case.get("description", "")
+            if desc:
+                print(textwrap.fill(desc, width=W, initial_indent="        ", subsequent_indent="        "))
+            data = case.get("test_data", "")
+            if data:
+                print(f"        {dim('data: ')}{data}")
+            print()
 
     # ── Test Checklist ────────────────────────────────────────────────────────
     checklist = result.get("test_checklist", [])
