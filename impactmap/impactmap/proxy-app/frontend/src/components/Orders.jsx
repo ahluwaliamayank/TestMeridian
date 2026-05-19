@@ -1,10 +1,6 @@
-// components/OrderConfirmation.jsx
-// Shows order details after placement.
-// API calls: fetchOrder (GET /orders/:id)
-
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchOrder } from "../api/client";
+import { fetchOrder, fetchOrders } from "../api/client";
 
 export function OrderConfirmation() {
   const { orderId } = useParams();
@@ -34,15 +30,6 @@ export function OrderConfirmation() {
     </div>
   );
 }
-
-
-// components/OrderHistory.jsx
-// Lists all past orders.
-// API calls: fetchOrders (GET /orders)
-
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { fetchOrders } from "../api/client";
 
 export function OrderHistory() {
   const [orders, setOrders] = useState([]);
