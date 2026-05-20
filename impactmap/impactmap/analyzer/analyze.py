@@ -319,6 +319,97 @@ def find_scenarios_touching(graph: dict, target_type: str, target_id: str) -> di
     return json.loads(raw)
 
 
+# ── Diff impact (changed nodes → ranked test scenarios) ──────────────────────
+
+def _diff_impact_prompt(graph: dict, diff_summary: dict) -> str:
+    """Build the system prompt for diff-impact scenario ranking."""
+    lines = _format_graph_dump(graph)
+
+    changed_comps = [c["id"] for c in diff_summary["changed_components"]]
+    changed_eps   = [e["id"] for e in diff_summary["changed_endpoints"]]
+    schema_files  = diff_summary["schema_files"]
+
+    lines.append(f"""
+## DIFF SUMMARY
+
+The developer modified these files:
+{chr(10).join('  - ' + f for f in diff_summary['changed_files'])}
+
+Mapping to graph nodes:
+  - Components changed: {', '.join(changed_comps) or 'none'}
+  - Endpoints changed:  {', '.join(changed_eps) or 'none'}
+  - Schema files changed: {', '.join(schema_files) or 'none'}
+
+The blast radius (nodes reachable from these changes via UI→API→DB edges) is:
+  - Components: {', '.join(sorted(diff_summary['blast_components']))}
+  - Endpoints:  {', '.join(sorted(diff_summary['blast_endpoints']))}
+  - Tables:     {', '.join(sorted(diff_summary['blast_tables']))}
+
+## YOUR TASK
+
+A QA engineer needs to know which test scenarios to run for this change set.
+Focus on flows that *demonstrably exercise* the changed code — not every
+reachable scenario. Rank by risk.
+
+Respond ONLY with a valid JSON object (no markdown fences, no explanation
+outside JSON):
+
+{{
+  "summary": "1-3 sentences: what changed, what it likely affects, biggest risk areas",
+  "scenarios": [
+    {{
+      "title": "Short imperative user-facing flow title",
+      "description": "1-2 sentences on what the user does and what to verify",
+      "covers_changes": ["Cart component", "GET /cart endpoint", "..."],
+      "components": ["ComponentName", ...],
+      "endpoints": ["METHOD /path", ...],
+      "tables": ["table_name", ...],
+      "test_data": "Concrete description of pre-existing data this case needs, or 'None required'",
+      "risk": "high",
+      "type": "positive"
+    }}
+  ]
+}}
+
+Risk guidance:
+- high   = a changed WRITE path on a critical table, FK cascades reachable,
+           auth- or money-adjacent flow, or schema change affecting writes
+- medium = a changed READ path on a critical table, or change reaches a
+           multi-step flow with several APIs
+- low    = isolated UI/text change with no DB writes triggered
+
+Guidelines:
+- Suggest 3-6 scenarios total. Mix positive and negative cases — at least
+  one negative if the diff touches a write path.
+- `covers_changes` must reference items that are actually in "Components/
+  Endpoints/Schema files changed" above.
+- Component/endpoint/table names MUST exactly match graph names.
+- Sort scenarios by risk (high → medium → low).
+""")
+    return "\n".join(lines)
+
+
+def analyze_diff_impact(graph: dict, diff_summary: dict) -> dict:
+    """LLM call: rank test scenarios that exercise the changes described in `diff_summary`."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=3500,
+        system=_diff_impact_prompt(graph, diff_summary),
+        messages=[{
+            "role": "user",
+            "content": "Rank the test scenarios this change set demands.",
+        }],
+    )
+    raw = message.content[0].text.strip()
+    raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(raw)
+
+
 # ── Pretty printer ────────────────────────────────────────────────────────────
 
 def print_analysis(result: dict, graph: dict):

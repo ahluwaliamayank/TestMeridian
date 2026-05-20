@@ -21,7 +21,18 @@ from pathlib import Path
 
 import streamlit as st
 
-from analyze import analyze_scenario, analyze_system, find_scenarios_touching
+from analyze import (
+    analyze_scenario,
+    analyze_system,
+    find_scenarios_touching,
+    analyze_diff_impact,
+)
+from diff_impact import (
+    find_repo_root,
+    get_changed_files,
+    categorize_changed_files,
+    compute_blast_radius,
+)
 
 
 # ── System-overview disk cache ───────────────────────────────────────────────
@@ -58,6 +69,7 @@ TABLE_ACTIVE     = "#10b981"   # green
 TABLE_DIM        = "#e0e0e0"
 EDGE_ACTIVE      = "#222"
 EDGE_DIM         = "#cccccc"
+CHANGED_BORDER   = "#dc2626"   # red border for nodes that were directly changed
 
 
 # ── DOT graph builder ────────────────────────────────────────────────────────
@@ -70,11 +82,30 @@ def _q(s: str) -> str:
 def build_dot(graph: dict,
               components_touched: set[str],
               endpoints_touched: set[str],
-              tables_touched: set[str]) -> str:
+              tables_touched: set[str],
+              components_changed: set[str] | None = None,
+              endpoints_changed: set[str] | None = None,
+              tables_changed: set[str] | None = None) -> str:
     """
-    Render the dependency graph as DOT, with touched nodes/edges in strong
-    colors and untouched ones dimmed.
+    Render the dependency graph as DOT.
+
+    `components_touched` etc. are the highlight set (active color).
+    `*_changed` (optional) are nodes that were *directly* changed — they get
+    a red border on top of the active color, to distinguish them from
+    reachable-but-unchanged nodes in the diff-impact view.
     """
+    components_changed = components_changed or set()
+    endpoints_changed  = endpoints_changed or set()
+    tables_changed     = tables_changed or set()
+
+    def _attrs(active: bool, changed: bool, active_fill: str, dim_fill: str) -> str:
+        fill = active_fill if active else dim_fill
+        fontcolor = "white" if active else "#666"
+        attrs = f'fillcolor="{fill}", fontcolor="{fontcolor}"'
+        if changed:
+            attrs += f', color="{CHANGED_BORDER}", penwidth=3'
+        return attrs
+
     lines: list[str] = [
         "digraph G {",
         '  rankdir=LR;',
@@ -87,36 +118,36 @@ def build_dot(graph: dict,
     lines.append('  subgraph cluster_ui {')
     lines.append('    label="UI"; style="rounded"; color="#bbbbbb"; fontname="Helvetica";')
     for c in graph["components"]:
-        active = c["id"] in components_touched
-        fill = COMPONENT_ACTIVE if active else COMPONENT_DIM
-        fontcolor = "white" if active else "#666"
-        lines.append(
-            f'    {_q(c["id"])} [fillcolor="{fill}", fontcolor="{fontcolor}"];'
+        attrs = _attrs(
+            c["id"] in components_touched,
+            c["id"] in components_changed,
+            COMPONENT_ACTIVE, COMPONENT_DIM,
         )
+        lines.append(f'    {_q(c["id"])} [{attrs}];')
     lines.append('  }')
 
     # ── API cluster ──────────────────────────────────────────────────────────
     lines.append('  subgraph cluster_api {')
     lines.append('    label="API"; style="rounded"; color="#bbbbbb"; fontname="Helvetica";')
     for ep in graph["endpoints"]:
-        active = ep["id"] in endpoints_touched
-        fill = ENDPOINT_ACTIVE if active else ENDPOINT_DIM
-        fontcolor = "white" if active else "#666"
-        lines.append(
-            f'    {_q(ep["id"])} [fillcolor="{fill}", fontcolor="{fontcolor}"];'
+        attrs = _attrs(
+            ep["id"] in endpoints_touched,
+            ep["id"] in endpoints_changed,
+            ENDPOINT_ACTIVE, ENDPOINT_DIM,
         )
+        lines.append(f'    {_q(ep["id"])} [{attrs}];')
     lines.append('  }')
 
     # ── DB cluster ───────────────────────────────────────────────────────────
     lines.append('  subgraph cluster_db {')
     lines.append('    label="DB"; style="rounded"; color="#bbbbbb"; fontname="Helvetica";')
     for t in graph["tables"]:
-        active = t["id"] in tables_touched
-        fill = TABLE_ACTIVE if active else TABLE_DIM
-        fontcolor = "white" if active else "#666"
-        lines.append(
-            f'    {_q(t["id"])} [shape=cylinder, fillcolor="{fill}", fontcolor="{fontcolor}"];'
+        attrs = _attrs(
+            t["id"] in tables_touched,
+            t["id"] in tables_changed,
+            TABLE_ACTIVE, TABLE_DIM,
         )
+        lines.append(f'    {_q(t["id"])} [shape=cylinder, {attrs}];')
     lines.append('  }')
 
     # ── Edges: component → endpoint ──────────────────────────────────────────
@@ -365,8 +396,8 @@ if "result" not in st.session_state:
     st.session_state["result"] = None
     st.session_state["scenario"] = ""
 
-tab_scenario, tab_overview, tab_reverse = st.tabs(
-    ["Scenario analysis", "System overview", "Reverse trace"]
+tab_scenario, tab_overview, tab_reverse, tab_diff = st.tabs(
+    ["Scenario analysis", "System overview", "Reverse trace", "Diff impact"]
 )
 
 # ── System overview tab ──────────────────────────────────────────────────────
@@ -547,3 +578,193 @@ with tab_reverse:
             st.markdown("---")
             st.markdown(f"### Drill-down: {drill.get('title', '')}")
             render_full_result(graph, drill["result"])
+
+
+# ── Diff impact tab ──────────────────────────────────────────────────────────
+with tab_diff:
+    st.caption(
+        "Point at a git ref. Claude maps changed files to graph nodes, computes "
+        "the blast radius, and ranks the test scenarios you should run — by risk."
+    )
+
+    repo_root = find_repo_root(Path.cwd())
+    if repo_root is None:
+        st.error("Not inside a git repository — diff impact requires one. "
+                 "Run the dashboard from a working tree with a `.git` directory.")
+    else:
+        st.caption(f"Repo: `{repo_root}`")
+
+        col_ref, col_btn, _ = st.columns([3, 1, 4])
+        with col_ref:
+            ref = st.text_input(
+                "Diff ref",
+                value="main...HEAD",
+                help=(
+                    "Examples:\n"
+                    "  • `main...HEAD` — current branch vs main (PR scenario)\n"
+                    "  • `HEAD` — uncommitted working-tree changes\n"
+                    "  • `--cached` — staged changes\n"
+                    "  • `HEAD~1..HEAD` — last commit only"
+                ),
+                key="diff_ref",
+            )
+        with col_btn:
+            diff_clicked = st.button(
+                "Analyze diff", type="primary", use_container_width=True, key="diff_analyze_btn",
+            )
+
+        if diff_clicked:
+            try:
+                changed_files = get_changed_files(repo_root, ref)
+            except RuntimeError as e:
+                st.error(str(e))
+                changed_files = None
+
+            if changed_files is not None:
+                if not changed_files:
+                    st.info("No files changed for that ref — nothing to analyze.")
+                    st.session_state["diff_result"] = None
+                else:
+                    categorized = categorize_changed_files(graph, changed_files)
+
+                    # Schema-file changes flag all tables as directly changed.
+                    if categorized["schema_files"]:
+                        changed_table_ids = {t["id"] for t in graph["tables"]}
+                    else:
+                        changed_table_ids = set()
+
+                    changed_comp_ids = {c["id"] for c in categorized["changed_components"]}
+                    changed_ep_ids   = {e["id"] for e in categorized["changed_endpoints"]}
+
+                    blast_c, blast_e, blast_t = compute_blast_radius(
+                        graph, changed_comp_ids, changed_ep_ids, changed_table_ids,
+                    )
+
+                    diff_summary = {
+                        "changed_files":      changed_files,
+                        "changed_components": categorized["changed_components"],
+                        "changed_endpoints":  categorized["changed_endpoints"],
+                        "schema_files":       categorized["schema_files"],
+                        "unmapped_files":     categorized["unmapped_files"],
+                        "changed_component_ids": changed_comp_ids,
+                        "changed_endpoint_ids":  changed_ep_ids,
+                        "changed_table_ids":     changed_table_ids,
+                        "blast_components":   blast_c,
+                        "blast_endpoints":    blast_e,
+                        "blast_tables":       blast_t,
+                    }
+
+                    if not api_key:
+                        st.error("No Anthropic API key — paste one in the sidebar.")
+                        st.session_state["diff_summary"] = diff_summary
+                        st.session_state["diff_result"] = None
+                    else:
+                        os.environ["ANTHROPIC_API_KEY"] = api_key
+                        with st.spinner("Ranking impacted scenarios…"):
+                            try:
+                                st.session_state["diff_summary"] = diff_summary
+                                st.session_state["diff_result"]  = analyze_diff_impact(graph, diff_summary)
+                                st.session_state["diff_drilldown"] = None
+                            except Exception as e:
+                                st.error(f"Diff analysis failed: {e}")
+                                st.session_state["diff_result"] = None
+
+        # Render summary + radius + scenarios from session state
+        diff_summary = st.session_state.get("diff_summary")
+        diff_result  = st.session_state.get("diff_result")
+
+        if diff_summary:
+            st.markdown("### Diff summary")
+            with st.container(border=True):
+                st.markdown(f"**{len(diff_summary['changed_files'])} files changed**")
+                for f in diff_summary["changed_files"]:
+                    st.markdown(f"- `{f}`")
+
+                mapping_lines = []
+                if diff_summary["changed_components"]:
+                    mapping_lines.append(
+                        f"**Components:** "
+                        + ", ".join(f"`{c['id']}`" for c in diff_summary["changed_components"])
+                    )
+                if diff_summary["changed_endpoints"]:
+                    mapping_lines.append(
+                        f"**Endpoints:** "
+                        + ", ".join(f"`{e['id']}`" for e in diff_summary["changed_endpoints"])
+                    )
+                if diff_summary["schema_files"]:
+                    mapping_lines.append(
+                        f"**Schema files:** "
+                        + ", ".join(f"`{f}`" for f in diff_summary["schema_files"])
+                        + " — all tables flagged as potentially changed"
+                    )
+                if diff_summary["unmapped_files"]:
+                    mapping_lines.append(
+                        f"_Unmapped (not in graph):_ "
+                        + ", ".join(f"`{f}`" for f in diff_summary["unmapped_files"])
+                    )
+                if mapping_lines:
+                    st.markdown("---")
+                    for ln in mapping_lines:
+                        st.markdown(ln)
+
+            st.markdown("### Blast radius")
+            dot = build_dot(
+                graph,
+                components_touched=diff_summary["blast_components"],
+                endpoints_touched=diff_summary["blast_endpoints"],
+                tables_touched=diff_summary["blast_tables"],
+                components_changed=diff_summary["changed_component_ids"],
+                endpoints_changed=diff_summary["changed_endpoint_ids"],
+                tables_changed=diff_summary["changed_table_ids"],
+            )
+            st.graphviz_chart(dot, use_container_width=True)
+            st.caption("Red border = directly changed · solid color = in blast radius · dimmed = untouched")
+
+        if diff_result:
+            st.markdown("### Suggested tests (ranked by risk)")
+            summary_text = diff_result.get("summary", "")
+            if summary_text:
+                st.info(summary_text)
+
+            scenarios = diff_result.get("scenarios", [])
+            risk_order = {"high": 0, "medium": 1, "low": 2}
+            scenarios = sorted(scenarios, key=lambda s: risk_order.get((s.get("risk") or "").lower(), 99))
+
+            for i, sc in enumerate(scenarios):
+                risk = (sc.get("risk") or "").lower()
+                ctype = (sc.get("type") or "").lower()
+                risk_label = {"high": "[HIGH]", "medium": "[MED]", "low": "[LOW]"}.get(risk, "[—]")
+                type_label = "✓ POS" if ctype == "positive" else "✗ NEG" if ctype == "negative" else "·"
+                with st.container(border=True):
+                    st.markdown(f"**{risk_label}**  {type_label}  **{sc.get('title','')}**")
+                    st.write(sc.get("description", ""))
+                    cc = sc.get("covers_changes", [])
+                    if cc:
+                        st.markdown("_Covers changes:_ " + ", ".join(f"`{c}`" for c in cc))
+                    td = sc.get("test_data", "")
+                    if td:
+                        st.markdown(f"**Data:** {td}")
+                    if st.button("Drill into this scenario", key=f"diff_drill_{i}"):
+                        if not api_key:
+                            st.error("No Anthropic API key.")
+                        else:
+                            os.environ["ANTHROPIC_API_KEY"] = api_key
+                            scenario_text = f"{sc.get('title','')}: {sc.get('description','')}".strip(": ")
+                            with st.spinner("Running full analysis…"):
+                                try:
+                                    full = analyze_scenario(graph, scenario_text)
+                                    st.session_state["diff_drilldown"] = {
+                                        "index": i,
+                                        "title": sc.get("title", ""),
+                                        "result": full,
+                                    }
+                                except SystemExit:
+                                    st.error("Claude returned a response that couldn't be parsed as JSON.")
+                                except Exception as e:
+                                    st.error(f"Drill-down failed: {e}")
+
+            drill = st.session_state.get("diff_drilldown")
+            if drill:
+                st.markdown("---")
+                st.markdown(f"### Drill-down: {drill.get('title', '')}")
+                render_full_result(graph, drill["result"])
