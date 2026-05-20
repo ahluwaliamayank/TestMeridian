@@ -8,9 +8,9 @@ For each route handler found, returns:
     "tables": [{"name": str, "operations": ["READ"/"WRITE"]}] }
 
 Python parsing strategy (stdlib `ast`):
-  Phase 1 — walk every .py file's AST, find SQLAlchemy class definitions
+  Phase 1 - walk every .py file's AST, find SQLAlchemy class definitions
             and their __tablename__, build {ModelName: table_name}.
-  Phase 2 — for every function with an @app.METHOD / @router.METHOD /
+  Phase 2 - for every function with an @app.METHOD / @router.METHOD /
             @app.route(...) decorator:
               - Extract (METHOD, path) from the decorator
               - Walk the function body to track which local variables are
@@ -50,7 +50,7 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
 _ROUTE_OBJECTS = {"app", "router"}
 _ORM_OBJECTS = {"db", "session"}
 
-# Raw SQL fallback — applied to string args of any call expression
+# Raw SQL fallback - applied to string args of any call expression
 _SQL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r'\bFROM\s+([a-z_][a-z0-9_]*)\b', re.IGNORECASE), "READ"),
     (re.compile(r'\bJOIN\s+([a-z_][a-z0-9_]*)\b', re.IGNORECASE), "READ"),
@@ -183,7 +183,7 @@ def _resolve_target_model(target: ast.expr,
     Strategy:
       - If the immediate object is itself an Attribute (`item.product.stock_qty`),
         treat the middle attr name (`product`) as a relationship pointing to a
-        registered model — match by case-insensitive equality / suffix.
+        registered model - match by case-insensitive equality / suffix.
       - Otherwise walk inward to the innermost Name and look it up in
         the per-function var_models map.
     """
@@ -245,7 +245,7 @@ def _extract_tables_from_function(func: ast.FunctionDef,
             if model:
                 var_models[target.id] = model
                 continue
-            # `var = Model(...)` — direct constructor call on a registered class
+            # `var = Model(...)` - direct constructor call on a registered class
             if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
                 if node.value.func.id in registry:
                     var_models[target.id] = node.value.func.id

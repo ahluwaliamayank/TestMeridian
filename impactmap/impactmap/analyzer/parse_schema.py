@@ -91,7 +91,7 @@ def parse_sql_schema(schema_path: str) -> list[dict]:
 
         fk_col_map = {fk["column"]: f"{fk['references_table']}.{fk['references_column']}" for fk in foreign_keys}
 
-        # Parse individual columns — skip constraint lines
+        # Parse individual columns - skip constraint lines
         lines = [l.strip() for l in body.split("\n") if l.strip()]
         for line in lines:
             # Skip pure constraint lines

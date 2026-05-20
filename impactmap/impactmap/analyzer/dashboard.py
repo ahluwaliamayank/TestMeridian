@@ -90,7 +90,7 @@ def build_dot(graph: dict,
     Render the dependency graph as DOT.
 
     `components_touched` etc. are the highlight set (active color).
-    `*_changed` (optional) are nodes that were *directly* changed — they get
+    `*_changed` (optional) are nodes that were *directly* changed - they get
     a red border on top of the active color, to distinguish them from
     reachable-but-unchanged nodes in the diff-impact view.
     """
@@ -192,7 +192,7 @@ def render_analysis(result: dict):
             apis = step.get("triggers_apis", [])
             api_str = " · ".join(f"`{a}`" for a in apis) if apis else ""
             st.markdown(
-                f"**{step.get('step', '?')}.** `{step.get('component', '')}` — "
+                f"**{step.get('step', '?')}.** `{step.get('component', '')}` - "
                 f"{step.get('action', '')}"
                 + (f"  \n&nbsp;&nbsp;&nbsp;&nbsp;↳ {api_str}" if api_str else "")
             )
@@ -219,7 +219,7 @@ def render_analysis(result: dict):
             ops = " · ".join(t.get("operations", []))
             cascades = t.get("cascades_to", [])
             st.markdown(
-                f"**`{t.get('table', '')}`** — {ops}  \n"
+                f"**`{t.get('table', '')}`** - {ops}  \n"
                 f"&nbsp;&nbsp;&nbsp;&nbsp;{t.get('reason', '')}"
                 + (
                     f"  \n&nbsp;&nbsp;&nbsp;&nbsp;_cascades to:_ "
@@ -422,7 +422,7 @@ with tab_overview:
             "Generate" if not cache_valid else "Refresh",
             type="primary",
             use_container_width=True,
-            help="Calls Claude to (re)build the system overview.",
+            help="Generates a fresh system overview.",
         )
     with col_b:
         if cache_valid:
@@ -430,14 +430,14 @@ with tab_overview:
         elif cache_exists:
             st.caption("Cache out of date (graph changed).")
         else:
-            st.caption("No cache yet — click Generate.")
+            st.caption("No cache yet - click Generate.")
 
     overview = None
     if cache_valid and not generate_clicked:
         overview = cached["result"]
     elif generate_clicked:
         if not api_key:
-            st.error("No Anthropic API key — paste one in the sidebar or set `ANTHROPIC_API_KEY`.")
+            st.error("No Anthropic API key - paste one in the sidebar or set `ANTHROPIC_API_KEY`.")
         else:
             os.environ["ANTHROPIC_API_KEY"] = api_key
             with st.spinner("Generating system overview…"):
@@ -470,15 +470,15 @@ with tab_scenario:
         if not scenario.strip():
             st.warning("Enter a scenario first.")
         elif not api_key:
-            st.error("No Anthropic API key — paste one in the sidebar or set `ANTHROPIC_API_KEY` in your shell.")
+            st.error("No Anthropic API key - paste one in the sidebar or set `ANTHROPIC_API_KEY` in your shell.")
         else:
             os.environ["ANTHROPIC_API_KEY"] = api_key
-            with st.spinner("Calling Claude…"):
+            with st.spinner("Analyzing…"):
                 try:
                     st.session_state["result"] = analyze_scenario(graph, scenario)
                     st.session_state["scenario"] = scenario
                 except SystemExit:
-                    st.error("Claude returned a response that couldn't be parsed as JSON. Try a more specific scenario.")
+                    st.error("The response could not be parsed as JSON. Try a more specific scenario.")
                     st.session_state["result"] = None
                 except Exception as e:
                     st.error(f"Analysis failed: {e}")
@@ -492,7 +492,7 @@ with tab_scenario:
 # ── Reverse trace tab ────────────────────────────────────────────────────────
 with tab_reverse:
     st.caption(
-        "Pick any graph node — component, endpoint, or table. Claude finds "
+        "Pick any graph node - component, endpoint, or table. The analyzer finds "
         "distinct user flows that touch it, then drill into any one for the "
         "full analysis."
     )
@@ -521,7 +521,7 @@ with tab_reverse:
 
     if trace_clicked:
         if not api_key:
-            st.error("No Anthropic API key — paste one in the sidebar or set `ANTHROPIC_API_KEY`.")
+            st.error("No Anthropic API key - paste one in the sidebar or set `ANTHROPIC_API_KEY`.")
         else:
             os.environ["ANTHROPIC_API_KEY"] = api_key
             with st.spinner(f"Finding scenarios that touch {target_type} `{target_id}`…"):
@@ -569,7 +569,7 @@ with tab_reverse:
                                     "result": full,
                                 }
                             except SystemExit:
-                                st.error("Claude returned a response that couldn't be parsed as JSON.")
+                                st.error("The response could not be parsed as JSON.")
                             except Exception as e:
                                 st.error(f"Drill-down failed: {e}")
 
@@ -583,13 +583,13 @@ with tab_reverse:
 # ── Diff impact tab ──────────────────────────────────────────────────────────
 with tab_diff:
     st.caption(
-        "Point at a git ref. Claude maps changed files to graph nodes, computes "
-        "the blast radius, and ranks the test scenarios you should run — by risk."
+        "Point at a git ref. The analyzer maps changed files to graph nodes, computes "
+        "the blast radius, and ranks the test scenarios you should run - by risk."
     )
 
     repo_root = find_repo_root(Path.cwd())
     if repo_root is None:
-        st.error("Not inside a git repository — diff impact requires one. "
+        st.error("Not inside a git repository - diff impact requires one. "
                  "Run the dashboard from a working tree with a `.git` directory.")
     else:
         st.caption(f"Repo: `{repo_root}`")
@@ -601,10 +601,10 @@ with tab_diff:
                 value="main...HEAD",
                 help=(
                     "Examples:\n"
-                    "  • `main...HEAD` — current branch vs main (PR scenario)\n"
-                    "  • `HEAD` — uncommitted working-tree changes\n"
-                    "  • `--cached` — staged changes\n"
-                    "  • `HEAD~1..HEAD` — last commit only"
+                    "  • `main...HEAD` - current branch vs main (PR scenario)\n"
+                    "  • `HEAD` - uncommitted working-tree changes\n"
+                    "  • `--cached` - staged changes\n"
+                    "  • `HEAD~1..HEAD` - last commit only"
                 ),
                 key="diff_ref",
             )
@@ -622,7 +622,7 @@ with tab_diff:
 
             if changed_files is not None:
                 if not changed_files:
-                    st.info("No files changed for that ref — nothing to analyze.")
+                    st.info("No files changed for that ref - nothing to analyze.")
                     st.session_state["diff_result"] = None
                 else:
                     categorized = categorize_changed_files(graph, changed_files)
@@ -655,7 +655,7 @@ with tab_diff:
                     }
 
                     if not api_key:
-                        st.error("No Anthropic API key — paste one in the sidebar.")
+                        st.error("No Anthropic API key - paste one in the sidebar.")
                         st.session_state["diff_summary"] = diff_summary
                         st.session_state["diff_result"] = None
                     else:
@@ -695,7 +695,7 @@ with tab_diff:
                     mapping_lines.append(
                         f"**Schema files:** "
                         + ", ".join(f"`{f}`" for f in diff_summary["schema_files"])
-                        + " — all tables flagged as potentially changed"
+                        + " - all tables flagged as potentially changed"
                     )
                 if diff_summary["unmapped_files"]:
                     mapping_lines.append(
@@ -733,7 +733,7 @@ with tab_diff:
             for i, sc in enumerate(scenarios):
                 risk = (sc.get("risk") or "").lower()
                 ctype = (sc.get("type") or "").lower()
-                risk_label = {"high": "[HIGH]", "medium": "[MED]", "low": "[LOW]"}.get(risk, "[—]")
+                risk_label = {"high": "[HIGH]", "medium": "[MED]", "low": "[LOW]"}.get(risk, "[-]")
                 type_label = "✓ POS" if ctype == "positive" else "✗ NEG" if ctype == "negative" else "·"
                 with st.container(border=True):
                     st.markdown(f"**{risk_label}**  {type_label}  **{sc.get('title','')}**")
@@ -759,7 +759,7 @@ with tab_diff:
                                         "result": full,
                                     }
                                 except SystemExit:
-                                    st.error("Claude returned a response that couldn't be parsed as JSON.")
+                                    st.error("The response could not be parsed as JSON.")
                                 except Exception as e:
                                     st.error(f"Drill-down failed: {e}")
 

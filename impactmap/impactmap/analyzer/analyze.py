@@ -158,7 +158,7 @@ Given a test scenario in natural language, analyze the dependency graph above an
 
 Guidelines for test_data_requirements and test_cases:
 - Decide needs_existing_data by inspecting api_call_sequence: if the very first call is a READ on a table, the test likely needs that table to be pre-populated; if it starts with a WRITE on an empty-tolerant table, it may not.
-- Provide up to 4 positive and up to 3 negative test cases. Cover the happy path, common variants, and edge cases (empty results, invalid inputs, missing auth, validation failures, concurrent state). Stop once you've exhausted meaningfully different cases — do not pad.
+- Provide up to 4 positive and up to 3 negative test cases. Cover the happy path, common variants, and edge cases (empty results, invalid inputs, missing auth, validation failures, concurrent state). Stop once you've exhausted meaningfully different cases - do not pad.
 - For each case's test_data, be specific about table state (e.g. "Two products with stock_qty > 0 and one with stock_qty = 0") so a QA engineer could write a fixture from it. Use "None required" when the case literally starts from an empty database.
 """)
     return "\n".join(lines)
@@ -175,7 +175,7 @@ def analyze_scenario(graph: dict, scenario: str) -> dict:
     client = anthropic.Anthropic(api_key=api_key)
     system_prompt = graph_to_prompt(graph)
 
-    print(dim("\n  Calling Claude..."), end="", flush=True)
+    print(dim("\n  Analyzing..."), end="", flush=True)
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=3500,
@@ -231,7 +231,7 @@ outside JSON) matching this structure:
 
 Guidelines:
 - Identify 3-6 feature areas that meaningfully group the components and endpoints.
-- For each area, suggest 2-3 positive cases and 1-2 negative cases — covering
+- For each area, suggest 2-3 positive cases and 1-2 negative cases - covering
   critical flows and important edge cases. Do not pad.
 - For test_data, be specific about table state (e.g. "Two products with
   stock_qty > 0 and one with stock_qty = 0") so a QA engineer could write
@@ -348,7 +348,7 @@ The blast radius (nodes reachable from these changes via UI→API→DB edges) is
 ## YOUR TASK
 
 A QA engineer needs to know which test scenarios to run for this change set.
-Focus on flows that *demonstrably exercise* the changed code — not every
+Focus on flows that *demonstrably exercise* the changed code - not every
 reachable scenario. Rank by risk.
 
 Respond ONLY with a valid JSON object (no markdown fences, no explanation
@@ -379,7 +379,7 @@ Risk guidance:
 - low    = isolated UI/text change with no DB writes triggered
 
 Guidelines:
-- Suggest 3-6 scenarios total. Mix positive and negative cases — at least
+- Suggest 3-6 scenarios total. Mix positive and negative cases - at least
   one negative if the diff touches a write path.
 - `covers_changes` must reference items that are actually in "Components/
   Endpoints/Schema files changed" above.

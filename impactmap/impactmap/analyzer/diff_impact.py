@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 
 
-# Files that, when changed, imply schema/model-level changes — all tables get
+# Files that, when changed, imply schema/model-level changes - all tables get
 # flagged as potentially affected. Conservative on purpose.
 _SCHEMA_FILENAME_HINTS = ("models.py", "schema.sql")
 
@@ -41,10 +41,10 @@ def get_changed_files(repo_dir: Path, ref: str) -> list[str]:
     Run `git diff --name-only <ref>` inside `repo_dir`.
 
     `ref` can be:
-      - 'main...HEAD'   — branch vs main (PR scenario)
-      - 'HEAD'          — uncommitted changes (working tree vs HEAD)
-      - '--cached'      — staged changes
-      - 'HEAD~1..HEAD'  — last commit only
+      - 'main...HEAD'   - branch vs main (PR scenario)
+      - 'HEAD'          - uncommitted changes (working tree vs HEAD)
+      - '--cached'      - staged changes
+      - 'HEAD~1..HEAD'  - last commit only
     """
     cmd = ["git", "diff", "--name-only", *ref.split()]
     result = subprocess.run(
@@ -126,7 +126,7 @@ def compute_blast_radius(graph: dict,
     Backward propagation:
       table → endpoints that touch it → components that call those endpoints
 
-    Returns (reachable_components, reachable_endpoints, reachable_tables) —
+    Returns (reachable_components, reachable_endpoints, reachable_tables) -
     each set includes the originally-changed ids plus everything reachable.
     """
     comps = set(changed_component_ids)
