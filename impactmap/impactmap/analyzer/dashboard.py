@@ -1,7 +1,7 @@
 """
 dashboard.py
 ------------
-Streamlit dashboard for ImpactMap.
+Streamlit dashboard for TestMeridian.
 
 Run:
     streamlit run dashboard.py
@@ -343,12 +343,12 @@ def render_system_overview(overview: dict):
 # ── Page ──────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="ImpactMap",
+    page_title="TestMeridian",
     page_icon=None,
     layout="wide",
 )
 
-st.title("ImpactMap")
+st.title("TestMeridian")
 st.caption("Trace a test scenario through UI → API → DB and surface test data requirements + cases.")
 
 # Sidebar: graph + diagnostics
