@@ -62,7 +62,8 @@ def red(s):    return f"{C.RED}{s}{C.RESET}"
 
 # ── Graph → LLM prompt ───────────────────────────────────────────────────────
 
-def graph_to_prompt(graph: dict) -> str:
+def _format_graph_dump(graph: dict) -> list[str]:
+    """Return the shared 'APPLICATION DEPENDENCY GRAPH' section as a list of lines."""
     lines = ["You are an expert in web application architecture and testing."]
     lines.append("\n## APPLICATION DEPENDENCY GRAPH\n")
 
@@ -94,6 +95,11 @@ def graph_to_prompt(graph: dict) -> str:
     for e in graph["edges"]["endpoint_to_table"]:
         lines.append(f"- {e['from']} → {e['to']} [{', '.join(e['operations'])}]")
 
+    return lines
+
+
+def graph_to_prompt(graph: dict) -> str:
+    lines = _format_graph_dump(graph)
     lines.append("""
 ## YOUR TASK
 
@@ -188,6 +194,129 @@ def analyze_scenario(graph: dict, scenario: str) -> dict:
         print(red(f"  Failed to parse LLM response as JSON: {e}"))
         print(dim(raw[:500]))
         sys.exit(1)
+
+
+# ── System-wide overview (graph-only, no scenario) ───────────────────────────
+
+def _system_overview_prompt(graph: dict) -> str:
+    lines = _format_graph_dump(graph)
+    lines.append("""
+## YOUR TASK
+
+Examine the application dependency graph above and identify the major
+feature areas of this system, then suggest test cases that cover each area.
+
+Respond ONLY with a valid JSON object (no markdown fences, no explanation
+outside JSON) matching this structure:
+
+{
+  "system_summary": "2-3 sentence summary of what this application does and who its users are",
+  "feature_areas": [
+    {
+      "name": "Short feature-area name (e.g. 'Cart management')",
+      "description": "1-2 sentences on what users do in this area",
+      "components": ["ComponentName", ...],
+      "endpoints": ["METHOD /path", ...],
+      "test_cases": [
+        {
+          "type": "positive",
+          "title": "Short imperative title",
+          "description": "What the test verifies and the expected outcome",
+          "test_data": "Concrete description of data required, or 'None required' if the case starts from an empty state"
+        }
+      ]
+    }
+  ]
+}
+
+Guidelines:
+- Identify 3-6 feature areas that meaningfully group the components and endpoints.
+- For each area, suggest 2-3 positive cases and 1-2 negative cases — covering
+  critical flows and important edge cases. Do not pad.
+- For test_data, be specific about table state (e.g. "Two products with
+  stock_qty > 0 and one with stock_qty = 0") so a QA engineer could write
+  a fixture from it. Use "None required" when the case starts from an empty
+  database.
+- Component and endpoint names in your output MUST exactly match the names
+  in the dependency graph above.
+""")
+    return "\n".join(lines)
+
+
+def analyze_system(graph: dict) -> dict:
+    """One LLM call: return a system-wide overview with feature areas and test cases."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        system=_system_overview_prompt(graph),
+        messages=[{"role": "user", "content": "Generate the system-wide test overview."}],
+    )
+    raw = message.content[0].text.strip()
+    raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(raw)
+
+
+# ── Reverse trace (node → scenarios) ─────────────────────────────────────────
+
+def _reverse_trace_prompt(graph: dict, target_type: str, target_id: str) -> str:
+    lines = _format_graph_dump(graph)
+    lines.append(f"""
+## YOUR TASK
+
+A developer is about to modify the {target_type} `{target_id}` and wants
+to know which real user-facing flows could be affected.
+
+Examine the dependency graph above and identify 3-5 *distinct* user-facing
+scenarios that demonstrably touch this {target_type}. Each scenario should
+be a real user intention (a flow), not an implementation detail.
+
+Respond ONLY with a valid JSON object (no markdown fences, no explanation
+outside JSON) matching this structure:
+
+{{
+  "target": {{"type": "{target_type}", "id": "{target_id}"}},
+  "scenarios": [
+    {{
+      "title": "Short user-facing flow title (e.g. 'User checks out their cart')",
+      "description": "1-2 sentences describing what the user does and why",
+      "components": ["ComponentName", ...],
+      "endpoints": ["METHOD /path", ...],
+      "tables": ["table_name", ...]
+    }}
+  ]
+}}
+
+Guidelines:
+- Each scenario MUST touch `{target_id}` somewhere in its flow.
+- Scenarios MUST be meaningfully distinct from each other. Do NOT pad with
+  near-duplicates that differ only in trivial detail.
+- Component, endpoint, and table names in your output MUST exactly match
+  names from the dependency graph above.
+""")
+    return "\n".join(lines)
+
+
+def find_scenarios_touching(graph: dict, target_type: str, target_id: str) -> dict:
+    """LLM call: given a graph node, return a list of distinct user scenarios that touch it."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=2500,
+        system=_reverse_trace_prompt(graph, target_type, target_id),
+        messages=[{"role": "user", "content": f"Find scenarios touching {target_type} {target_id}."}],
+    )
+    raw = message.content[0].text.strip()
+    raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(raw)
 
 
 # ── Pretty printer ────────────────────────────────────────────────────────────
