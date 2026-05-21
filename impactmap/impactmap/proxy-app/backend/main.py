@@ -29,7 +29,7 @@ app.add_middleware(
 
 app.mount("/images", StaticFiles(directory="/images"), name="images")
 
-DEMO_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+DEMO_USER_ID = "1"
 
 
 # ── Products ──────────────────────────────────────────────────────────────────

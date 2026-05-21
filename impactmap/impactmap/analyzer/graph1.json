@@ -1,0 +1,525 @@
+{
+  "components": [
+    {
+      "id": "OrderConfirmation",
+      "file": "components/Orders.jsx",
+      "api_calls": [
+        "GET /orders/:param"
+      ]
+    },
+    {
+      "id": "OrderHistory",
+      "file": "components/Orders.jsx",
+      "api_calls": [
+        "GET /orders"
+      ]
+    },
+    {
+      "id": "ProductList",
+      "file": "components/ProductList.jsx",
+      "api_calls": [
+        "GET /products"
+      ]
+    },
+    {
+      "id": "Cart",
+      "file": "components/Cart.jsx",
+      "api_calls": [
+        "DELETE /cart/item/:param",
+        "GET /cart"
+      ]
+    },
+    {
+      "id": "ProductCard",
+      "file": "components/ProductCard.jsx",
+      "api_calls": [
+        "POST /cart/add"
+      ]
+    },
+    {
+      "id": "Checkout",
+      "file": "components/Checkout.jsx",
+      "api_calls": [
+        "GET /cart",
+        "POST /orders"
+      ]
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "GET /products",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "products",
+          "operations": [
+            "READ"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GET /products/{product_id}",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "products",
+          "operations": [
+            "READ"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GET /cart",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "cart_items",
+          "operations": [
+            "READ"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "POST /cart/add",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "cart_items",
+          "operations": [
+            "READ",
+            "WRITE"
+          ]
+        },
+        {
+          "name": "products",
+          "operations": [
+            "READ"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "DELETE /cart/item/{product_id}",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "cart_items",
+          "operations": [
+            "READ",
+            "WRITE"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "POST /orders",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "cart_items",
+          "operations": [
+            "READ",
+            "WRITE"
+          ]
+        },
+        {
+          "name": "order_items",
+          "operations": [
+            "WRITE"
+          ]
+        },
+        {
+          "name": "orders",
+          "operations": [
+            "WRITE"
+          ]
+        },
+        {
+          "name": "products",
+          "operations": [
+            "WRITE"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GET /orders",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "orders",
+          "operations": [
+            "READ"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GET /orders/{order_id}",
+      "file": "main.py",
+      "tables": [
+        {
+          "name": "order_items",
+          "operations": [
+            "READ"
+          ]
+        },
+        {
+          "name": "orders",
+          "operations": [
+            "READ"
+          ]
+        }
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "id": "cart_items",
+      "columns": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "pk": true,
+          "fk": null
+        },
+        {
+          "name": "user_id",
+          "type": "UUID",
+          "pk": false,
+          "fk": "users.id"
+        },
+        {
+          "name": "product_id",
+          "type": "UUID",
+          "pk": false,
+          "fk": "products.id"
+        },
+        {
+          "name": "quantity",
+          "type": "INTEGER",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "added_at",
+          "type": "TIMESTAMP WITHOUT TIME ZONE",
+          "pk": false,
+          "fk": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "column": "product_id",
+          "references_table": "products",
+          "references_column": "id"
+        },
+        {
+          "column": "user_id",
+          "references_table": "users",
+          "references_column": "id"
+        }
+      ]
+    },
+    {
+      "id": "order_items",
+      "columns": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "pk": true,
+          "fk": null
+        },
+        {
+          "name": "order_id",
+          "type": "UUID",
+          "pk": false,
+          "fk": "orders.id"
+        },
+        {
+          "name": "product_id",
+          "type": "UUID",
+          "pk": false,
+          "fk": "products.id"
+        },
+        {
+          "name": "quantity",
+          "type": "INTEGER",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "unit_price",
+          "type": "NUMERIC",
+          "pk": false,
+          "fk": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "column": "order_id",
+          "references_table": "orders",
+          "references_column": "id"
+        },
+        {
+          "column": "product_id",
+          "references_table": "products",
+          "references_column": "id"
+        }
+      ]
+    },
+    {
+      "id": "orders",
+      "columns": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "pk": true,
+          "fk": null
+        },
+        {
+          "name": "user_id",
+          "type": "UUID",
+          "pk": false,
+          "fk": "users.id"
+        },
+        {
+          "name": "status",
+          "type": "CHARACTER VARYING",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "total_amount",
+          "type": "NUMERIC",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "shipping_addr",
+          "type": "TEXT",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITHOUT TIME ZONE",
+          "pk": false,
+          "fk": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "column": "user_id",
+          "references_table": "users",
+          "references_column": "id"
+        }
+      ]
+    },
+    {
+      "id": "products",
+      "columns": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "pk": true,
+          "fk": null
+        },
+        {
+          "name": "name",
+          "type": "CHARACTER VARYING",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "price",
+          "type": "NUMERIC",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "stock_qty",
+          "type": "INTEGER",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "category",
+          "type": "CHARACTER VARYING",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITHOUT TIME ZONE",
+          "pk": false,
+          "fk": null
+        }
+      ],
+      "foreign_keys": []
+    },
+    {
+      "id": "users",
+      "columns": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "pk": true,
+          "fk": null
+        },
+        {
+          "name": "email",
+          "type": "CHARACTER VARYING",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "name",
+          "type": "CHARACTER VARYING",
+          "pk": false,
+          "fk": null
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP WITHOUT TIME ZONE",
+          "pk": false,
+          "fk": null
+        }
+      ],
+      "foreign_keys": []
+    }
+  ],
+  "edges": {
+    "component_to_endpoint": [
+      {
+        "from": "OrderHistory",
+        "to": "GET /orders"
+      },
+      {
+        "from": "ProductList",
+        "to": "GET /products"
+      },
+      {
+        "from": "Cart",
+        "to": "GET /cart"
+      },
+      {
+        "from": "ProductCard",
+        "to": "POST /cart/add"
+      },
+      {
+        "from": "Checkout",
+        "to": "GET /cart"
+      },
+      {
+        "from": "Checkout",
+        "to": "POST /orders"
+      }
+    ],
+    "endpoint_to_table": [
+      {
+        "from": "GET /products",
+        "to": "products",
+        "operations": [
+          "READ"
+        ]
+      },
+      {
+        "from": "GET /products/{product_id}",
+        "to": "products",
+        "operations": [
+          "READ"
+        ]
+      },
+      {
+        "from": "GET /cart",
+        "to": "cart_items",
+        "operations": [
+          "READ"
+        ]
+      },
+      {
+        "from": "POST /cart/add",
+        "to": "cart_items",
+        "operations": [
+          "READ",
+          "WRITE"
+        ]
+      },
+      {
+        "from": "POST /cart/add",
+        "to": "products",
+        "operations": [
+          "READ"
+        ]
+      },
+      {
+        "from": "DELETE /cart/item/{product_id}",
+        "to": "cart_items",
+        "operations": [
+          "READ",
+          "WRITE"
+        ]
+      },
+      {
+        "from": "POST /orders",
+        "to": "cart_items",
+        "operations": [
+          "READ",
+          "WRITE"
+        ]
+      },
+      {
+        "from": "POST /orders",
+        "to": "order_items",
+        "operations": [
+          "WRITE"
+        ]
+      },
+      {
+        "from": "POST /orders",
+        "to": "orders",
+        "operations": [
+          "WRITE"
+        ]
+      },
+      {
+        "from": "POST /orders",
+        "to": "products",
+        "operations": [
+          "WRITE"
+        ]
+      },
+      {
+        "from": "GET /orders",
+        "to": "orders",
+        "operations": [
+          "READ"
+        ]
+      },
+      {
+        "from": "GET /orders/{order_id}",
+        "to": "order_items",
+        "operations": [
+          "READ"
+        ]
+      },
+      {
+        "from": "GET /orders/{order_id}",
+        "to": "orders",
+        "operations": [
+          "READ"
+        ]
+      }
+    ]
+  }
+}

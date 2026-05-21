@@ -26,7 +26,21 @@ _SCHEMA_FILENAME_HINTS = ("models.py", "schema.sql")
 # ── Repo discovery ──────────────────────────────────────────────────────────
 
 def find_repo_root(start: Path | str = ".") -> Path | None:
-    """Walk upward from `start` looking for a `.git` directory."""
+    """
+    Locate the git repo root.
+
+    Order of precedence:
+      1. `IMPACTMAP_REPO_ROOT` env var, if set and the path contains `.git`.
+         This is the escape hatch for Docker setups where CWD is not inside
+         the repo tree but `.git` is bind-mounted elsewhere.
+      2. Walk upward from `start` looking for a `.git` directory.
+    """
+    override = os.environ.get("IMPACTMAP_REPO_ROOT")
+    if override:
+        op = Path(override)
+        if (op / ".git").exists():
+            return op
+
     p = Path(start).resolve()
     for ancestor in (p, *p.parents):
         if (ancestor / ".git").exists():

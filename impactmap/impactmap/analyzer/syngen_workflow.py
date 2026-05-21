@@ -55,6 +55,7 @@ def run_syngen_workflow(
     """
 
     try:
+        tables.remove('products')
         table_list = ", ".join(tables)
 
         # ── Initiate ─────────────────────────────────────────
@@ -192,28 +193,28 @@ def run_syngen_workflow(
 
         # time.sleep(STEP_DELAY)
 
-        # ── Step 6b: Patch UUID primary key fields ─────────────
-        on_message("Configuring UUID primary key fields...", RUNNING)
-        # time.sleep(STEP_DELAY)
-        ds_fields = client.get_dataset_fields(dataset_id)
-        uuid_pk_fields = [
-            f for f in ds_fields
-            if f.get("is_primary_key")
-            and (
-                str(f.get("sql_type", "")).lower() in ("uuid", "object", "other", "1111")
-                or str(f.get("display_type", "")).lower() in ("uuid", "object", "other")
-                or f.get("name", "").lower() == "id"
-            )
-        ]
-        UUID_GENERATOR_INSTANCE_ID = "8b59c0e6-10ca-41fb-bbe4-0d14a74fb421"
-        if uuid_pk_fields:
-            for field in uuid_pk_fields:
-                client.patch_field(dataset_id, str(field["id"]), {
-                    "generator_id": UUID_GENERATOR_INSTANCE_ID,
-                })
-            on_message(f"Configured {len(uuid_pk_fields)} UUID primary key field(s) with UUID generator.", DONE)
-        else:
-            on_message("No UUID primary key fields to configure.", DONE)
+        # # ── Step 6b: Patch UUID primary key fields ─────────────
+        # on_message("Configuring UUID primary key fields...", RUNNING)
+        # # time.sleep(STEP_DELAY)
+        # ds_fields = client.get_dataset_fields(dataset_id)
+        # uuid_pk_fields = [
+        #     f for f in ds_fields
+        #     if f.get("is_primary_key")
+        #     and (
+        #         str(f.get("sql_type", "")).lower() in ("uuid", "object", "other", "1111")
+        #         or str(f.get("display_type", "")).lower() in ("uuid", "object", "other")
+        #         or f.get("name", "").lower() == "id"
+        #     )
+        # ]
+        # UUID_GENERATOR_INSTANCE_ID = "8b59c0e6-10ca-41fb-bbe4-0d14a74fb421"
+        # if uuid_pk_fields:
+        #     for field in uuid_pk_fields:
+        #         client.patch_field(dataset_id, str(field["id"]), {
+        #             "generator_id": UUID_GENERATOR_INSTANCE_ID,
+        #         })
+        #     on_message(f"Configured {len(uuid_pk_fields)} UUID primary key field(s) with UUID generator.", DONE)
+        # else:
+        #     on_message("No UUID primary key fields to configure.", DONE)
 
         # time.sleep(STEP_DELAY)
 
@@ -222,7 +223,7 @@ def run_syngen_workflow(
         # time.sleep(STEP_DELAY)
         ds_structures = client.get_dataset_structures(dataset_id)
         overrides = [
-            {"structure_id": s["id"], "records_count": 1} for s in ds_structures
+            {"structure_id": s["id"], "records_count": 1} for s in ds_structures if s["name"] == "users"
         ]
         if overrides:
             client.update_records_count(dataset_id, overrides)

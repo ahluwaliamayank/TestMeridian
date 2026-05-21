@@ -46,12 +46,17 @@ services:
       SYNGEN_API_URL: ${SYNGEN_API_URL:-https://host.docker.internal}
       DCT_API_KEY: ${DCT_API_KEY}
       SYNGEN_JDBC_DRIVER_ID: ${SYNGEN_JDBC_DRIVER_ID}
+      # Used by diff_impact.find_repo_root so it doesn't have to walk up looking for .git
+      IMPACTMAP_REPO_ROOT: /repo
     ports:
       - "8501:8501"
     depends_on:
       - db
+    working_dir: /repo/impactmap/impactmap/analyzer
     volumes:
-      - ./analyzer:/app
+      # Mount the entire repo so `.git` and source paths used by graph.json are reachable.
+      - ../..:/repo
+      # Keep the proxy-app bind mounts so existing graph-build paths and CLI examples still work.
       - ./proxy-app/frontend/src:/proxy-app/frontend/src
       - ./proxy-app/backend:/proxy-app/backend
 
