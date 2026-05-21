@@ -33,6 +33,8 @@ impactmap/
     ├── introspect_db.py      ← Live Postgres introspection
     ├── build_graph.py        ← Assembles graph.json
     ├── diff_impact.py        ← Git diff → blast radius analysis
+    ├── syngen_client.py      ← HTTP client for syngen-api
+    ├── syngen_workflow.py    ← Synthetic data generation workflow
     └── requirements.txt
 ```
 
@@ -42,8 +44,9 @@ impactmap/
 
 - **Docker** and **Docker Compose**
 - An **Anthropic API key** (for the analyzer)
+- (Optional) A running **syngen-api** instance + API key for synthetic data generation
 
-That's it. Everything runs in containers.
+Everything runs in containers.
 
 ---
 
@@ -63,11 +66,34 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ### Export the API key
 
-Docker Compose reads `ANTHROPIC_API_KEY` from your shell environment:
+Docker Compose reads environment variables from your shell:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+### (Optional) Synthetic data generation
+
+To enable the syngen-api integration for generating synthetic test data:
+
+```bash
+export LINK_SYNTHETIC_DATA=true
+export SYNGEN_API_URL=https://host.docker.internal
+export DCT_API_KEY=<your-syngen-api-key>
+export SYNGEN_JDBC_DRIVER_ID=<uploaded-jdbc-driver-file-id>
+```
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `LINK_SYNTHETIC_DATA` | No | Set to `true` to enable. Default: `false` |
+| `SYNGEN_API_URL` | If enabled | Base URL of the syngen-api instance (use `https://host.docker.internal` when running in Docker) |
+| `DCT_API_KEY` | If enabled | API key for syngen-api authentication |
+| `SYNGEN_JDBC_DRIVER_ID` | If enabled | File upload ID of a pre-uploaded PostgreSQL JDBC driver in syngen-api |
+
+**Prerequisites for syngen integration:**
+1. A running syngen-api instance accessible from the analyzer container
+2. A PostgreSQL JDBC driver JAR uploaded to syngen-api via `POST /dct/v3/synthetic/file-uploads`
+3. The file upload ID from step 2 set as `SYNGEN_JDBC_DRIVER_ID`
 
 ---
 
@@ -83,7 +109,7 @@ This starts four services:
 
 | Service    | URL                     | Description                          |
 |------------|-------------------------|--------------------------------------|
-| db         | localhost:5432          | PostgreSQL 16 with schema + seed data|
+| db         | localhost:5435          | PostgreSQL 16 with schema + seed data|
 | backend    | http://localhost:8000   | FastAPI REST API + static images     |
 | frontend   | http://localhost:5173   | React e-commerce storefront          |
 | analyzer   | http://localhost:8501   | Streamlit analysis dashboard         |
@@ -91,7 +117,7 @@ This starts four services:
 You can connect to the database directly using any Postgres client:
 
 ```bash
-psql -h localhost -U postgres -d impactmap
+psql -h localhost -p 5435 -U postgres -d impactmap
 # Password: postgres
 ```
 
@@ -194,7 +220,26 @@ docker compose exec analyzer python analyze.py \
 
 ---
 
-## 5 · Running Without Docker
+## 5 · Synthetic Data Generation
+
+When `LINK_SYNTHETIC_DATA=true`, a "Generate Data" button appears in the scenario analysis results whenever the test data setup indicates pre-existing data is required.
+
+Clicking this button opens a slide-out conversational panel that automatically:
+
+1. Creates or finds the "Amazone" application in syngen-api
+2. Registers the PostgreSQL JDBC driver (if not already registered)
+3. Creates a database connector pointing to the proxy-app database (`localhost:5435`)
+4. Triggers schema discovery (ASDD)
+5. Creates a dataset with the required tables
+6. Generates 1 record of synthetic data per table
+
+The connector uses the EXTENDED subtype with a pre-uploaded PostgreSQL JDBC driver. The same connector serves as both reference (for schema discovery) and target (for data generation).
+
+**Note:** The syngen-api instance must be able to reach the proxy-app database at `localhost:5435`. If syngen-api runs in Docker, you may need `host.docker.internal` instead.
+
+---
+
+## 6 · Running Without Docker
 
 If you prefer to run services locally without Docker, you'll need:
 - **Python 3.11+**
@@ -248,7 +293,7 @@ python analyze.py \
 
 ---
 
-## 6 · Troubleshooting
+## 7 · Troubleshooting
 
 ### Database schema not applied
 
@@ -261,11 +306,11 @@ docker compose up --build
 
 ### Port conflicts
 
-If port 5432 is already in use by another Postgres instance, the `db` service will fail. Stop the conflicting service first:
+The proxy-app database is exposed on port `5435` to avoid conflicts with other Postgres instances (e.g., syngen-api on `5432`). If port `5435` is in use, stop the conflicting service:
 
 ```bash
 # Find what's using the port
-lsof -i :5432
+lsof -i :5435
 
 # Stop it (example: standalone container)
 docker stop <container-name>

@@ -10,7 +10,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <nav className="navbar">
-        <Link to="/" className="navbar-logo">ImpactStore</Link>
+        <Link to="/" className="navbar-logo">Amazone</Link>
         <div className="navbar-links">
           <NavLink to="/" end>Products</NavLink>
           <NavLink to="/cart">Cart</NavLink>

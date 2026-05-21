@@ -28,12 +28,21 @@ from analyze import (
     analyze_diff_impact,
 )
 from build_graph import build_graph, save_graph
+from syngen_client import SyngenClient
+from syngen_workflow import run_syngen_workflow
 from diff_impact import (
     find_repo_root,
     get_changed_files,
     categorize_changed_files,
     compute_blast_radius,
 )
+
+
+# ── Synthetic data feature flag ──────────────────────────────────────────────
+SYNGEN_ENABLED = os.environ.get("LINK_SYNTHETIC_DATA", "false").lower() == "true"
+SYNGEN_API_URL = os.environ.get("SYNGEN_API_URL", "https://localhost")
+DCT_API_KEY = os.environ.get("DCT_API_KEY", "")
+SYNGEN_JDBC_DRIVER_ID = os.environ.get("SYNGEN_JDBC_DRIVER_ID", "")
 
 
 # ── System-overview disk cache ───────────────────────────────────────────────
@@ -181,6 +190,34 @@ def build_dot(graph: dict,
 
 # ── Result rendering ─────────────────────────────────────────────────────────
 
+def render_syngen_panel():
+    """Render the slide-out conversational panel for synthetic data generation."""
+    if not st.session_state.get("syngen_panel_open"):
+        return
+
+    messages = st.session_state.get("syngen_messages", [])
+    msgs_html = ""
+    for text, status in messages:
+        msgs_html += f'<div class="syngen-msg {status}">{text}</div>'
+
+    st.markdown(
+        f"""
+        <div class="syngen-panel">
+            <div class="syngen-panel-header">
+                <span>Generate Synthetic Data</span>
+                <button class="syngen-panel-close" onclick="
+                    this.closest('.syngen-panel').style.display='none';
+                ">✕</button>
+            </div>
+            <div class="syngen-panel-body">
+                {msgs_html if msgs_html else '<div class="syngen-msg running">Initializing...</div>'}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_analysis(result: dict):
     st.markdown(f"#### Scenario")
     st.write(result.get("scenario_summary", ""))
@@ -239,6 +276,35 @@ def render_analysis(result: dict):
             st.warning(f"**Pre-existing data required.** {desc}")
         else:
             st.success(f"**No pre-existing data needed.** {desc}")
+
+        if SYNGEN_ENABLED and needs:
+            impacted = result.get("impacted_tables", [])
+            table_names = [t.get("table", "") for t in impacted if t.get("table")]
+            if table_names and st.button(
+                "Generate Data",
+                type="primary",
+                key="syngen_generate",
+            ):
+                st.session_state["syngen_panel_open"] = True
+                st.session_state["syngen_messages"] = []
+
+                def on_message(text, status):
+                    st.session_state["syngen_messages"].append((text, status))
+
+                client = SyngenClient(SYNGEN_API_URL, DCT_API_KEY)
+                run_syngen_workflow(
+                    client=client,
+                    jdbc_driver_id=SYNGEN_JDBC_DRIVER_ID,
+                    db_host="host.docker.internal",
+                    db_port=5435,
+                    db_user="postgres",
+                    db_password="postgres",
+                    db_name="impactmap",
+                    db_schema="public",
+                    tables=table_names,
+                    on_message=on_message,
+                )
+                st.rerun()
 
     # Suggested test cases
     cases = result.get("test_cases", [])
@@ -369,6 +435,56 @@ button[kind="primary"]:hover {
     border-color: #3d22e6 !important;
 }
 
+/* Slide-out panel */
+.syngen-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 420px;
+    height: 100vh;
+    background: #ffffff;
+    border-left: 1px solid #e5e7eb;
+    box-shadow: -4px 0 12px rgba(0,0,0,0.08);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    font-family: inherit;
+}
+.syngen-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    font-weight: 600;
+    font-size: 15px;
+}
+.syngen-panel-close {
+    cursor: pointer;
+    font-size: 20px;
+    color: #6b7280;
+    background: none;
+    border: none;
+    padding: 4px 8px;
+}
+.syngen-panel-close:hover {
+    color: #111827;
+}
+.syngen-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+}
+.syngen-msg {
+    padding: 8px 0;
+    font-size: 13px;
+    line-height: 1.5;
+    border-bottom: 1px solid #f3f4f6;
+}
+.syngen-msg.done { color: #059669; }
+.syngen-msg.error { color: #dc2626; }
+.syngen-msg.running { color: #6b7280; }
+
 </style>
 
 """, unsafe_allow_html=True)
@@ -383,7 +499,7 @@ with st.sidebar:
     # Connected Applications
     st.header("Connected Applications")
     st.markdown("**Application**")
-    st.selectbox("Application", ["ImpactStore"], key="connected_app", label_visibility="collapsed")
+    st.selectbox("Application", ["Amazone"], key="connected_app", label_visibility="collapsed")
 
     # Load graph
     graph: dict | None = None
@@ -836,3 +952,7 @@ with tab_diff:
                 st.markdown("---")
                 st.markdown(f"### Drill-down: {drill.get('title', '')}")
                 render_full_result(graph, drill["result"])
+
+# ── Synthetic data slide-out panel ───────────────────────────────────────────
+if SYNGEN_ENABLED:
+    render_syngen_panel()

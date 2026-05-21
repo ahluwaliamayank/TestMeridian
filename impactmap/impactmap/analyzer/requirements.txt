@@ -4,3 +4,4 @@ tree-sitter-javascript>=0.21.0
 tree-sitter-typescript>=0.21.0
 streamlit>=1.30.0
 psycopg2-binary>=2.9.0
+requests>=2.31.0
