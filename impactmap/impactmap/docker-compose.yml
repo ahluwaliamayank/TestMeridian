@@ -11,10 +11,10 @@ services:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - ./proxy-app/schema.sql:/docker-entrypoint-initdb.d/schema.sql
 
   backend:
-    build: ./backend
+    build: ./proxy-app/backend
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/impactmap
     ports:
@@ -23,18 +23,33 @@ services:
       - db
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
-      - ./backend:/app
+      - ./proxy-app/backend:/app
+      - ./resources:/images
 
   frontend:
-    build: ./frontend
+    build: ./proxy-app/frontend
     ports:
       - "5173:5173"
     environment:
       VITE_API_URL: http://localhost:8000
     volumes:
-      - ./frontend:/app
+      - ./proxy-app/frontend:/app
       - /app/node_modules
     command: npm run dev -- --host
+
+  analyzer:
+    build: ./analyzer
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/impactmap
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    ports:
+      - "8501:8501"
+    depends_on:
+      - db
+    volumes:
+      - ./analyzer:/app
+      - ./proxy-app/frontend/src:/proxy-app/frontend/src
+      - ./proxy-app/backend:/proxy-app/backend
 
 volumes:
   pg_data:

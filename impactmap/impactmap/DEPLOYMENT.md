@@ -1,256 +1,292 @@
-# ImpactMap
+# ImpactMap — Deployment Guide
 
-Prove that you can parse a UI repo + API repo + DB schema, build a dependency
-graph, and — given a plain-English test scenario — have an LLM tell you:
+Statically parses a UI repo + API repo + DB schema, builds a dependency
+graph, and — given a plain-English test scenario — uses an LLM to tell you:
 - Which UI components to exercise (and in what order)
 - Which API endpoints fire
 - Which database tables get touched (READ / WRITE) and why
 
 ---
 
-## What's in here
+## Project Structure
 
 ```
 impactmap/
-├── proxy-app/               ← The "target" app you point the tool at
-│   ├── frontend/            ← React (Vite) e-commerce UI
-│   ├── backend/             ← FastAPI + raw psycopg2
-│   ├── schema.sql           ← Postgres schema (5 tables)
-│   └── docker-compose.yml
+├── docker-compose.yml        ← Orchestrates all services
+├── resources/                ← Product images served by the backend
+│   ├── headphones.jpg
+│   ├── running-shoes.jpg
+│   ├── coffee-grinder.jpg
+│   ├── yoga-mat.jpg
+│   └── desklamp.jpg
 │
-└── analyzer/                ← The ImpactMap CLI tool
-    ├── parse_ui.py          ← Walks React source, extracts component → API edges
-    ├── parse_api.py         ← Walks FastAPI source, extracts endpoint → table edges
-    ├── parse_schema.py      ← Parses .sql or .prisma, extracts tables + FK graph
-    ├── build_graph.py       ← Assembles graph.json
-    ├── analyze.py           ← Main CLI: takes scenario, calls Claude, prints result
+├── proxy-app/                ← The "target" e-commerce app
+│   ├── frontend/             ← React (Vite) SPA
+│   ├── backend/              ← FastAPI + SQLAlchemy ORM
+│   └── schema.sql            ← Postgres DDL + seed data (5 tables)
+│
+└── analyzer/                 ← The ImpactMap analysis tool
+    ├── analyze.py            ← CLI: scenario analysis, reverse trace, diff impact
+    ├── dashboard.py          ← Streamlit web dashboard
+    ├── parse_ui.py           ← React/JSX parser (tree-sitter)
+    ├── parse_api.py          ← FastAPI parser (tree-sitter + ast)
+    ├── introspect_db.py      ← Live Postgres introspection
+    ├── build_graph.py        ← Assembles graph.json
+    ├── diff_impact.py        ← Git diff → blast radius analysis
     └── requirements.txt
 ```
 
 ---
 
-## 1 · Deploy the proxy app
+## Prerequisites
 
-### Prerequisites
-- Docker + Docker Compose
-- Node 20+ (if running frontend without Docker)
-- Python 3.11+ (if running backend without Docker)
+- **Docker** and **Docker Compose**
+- An **Anthropic API key** (for the analyzer)
 
-### With Docker (recommended)
+That's it. Everything runs in containers.
+
+---
+
+## 1 · Environment Setup
+
+### Create your `.env` file
 
 ```bash
-cd impactmap/proxy-app
+cp .env.example .env
+```
+
+Edit `.env` and add your Anthropic API key:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### Export the API key
+
+Docker Compose reads `ANTHROPIC_API_KEY` from your shell environment:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
+## 2 · Start All Services
+
+From the `impactmap/impactmap/` directory:
+
+```bash
 docker compose up --build
 ```
 
-This starts:
-| Service  | URL                   |
-|----------|-----------------------|
-| Postgres | localhost:5432        |
-| FastAPI  | http://localhost:8000 |
-| React    | http://localhost:5173 |
+This starts four services:
 
-The schema is applied automatically on first run (mounted into
-`/docker-entrypoint-initdb.d/`). Seed data (5 products, 1 demo user) is
-included in schema.sql.
+| Service    | URL                     | Description                          |
+|------------|-------------------------|--------------------------------------|
+| db         | localhost:5432          | PostgreSQL 16 with schema + seed data|
+| backend    | http://localhost:8000   | FastAPI REST API + static images     |
+| frontend   | http://localhost:5173   | React e-commerce storefront          |
+| analyzer   | http://localhost:8501   | Streamlit analysis dashboard         |
 
-### Without Docker
+You can connect to the database directly using any Postgres client:
 
-**Postgres**
 ```bash
-createdb impactmap
-psql impactmap < schema.sql
+psql -h localhost -U postgres -d impactmap
+# Password: postgres
 ```
 
-**Backend**
+The database schema and seed data (5 products, 1 demo user) are applied automatically on first startup via `schema.sql`.
+
+Product images from `resources/` are served by the backend at `/images/` (e.g., `http://localhost:8000/images/headphones.jpg`).
+
+---
+
+## 3 · Cleaning Up a Previous Setup
+
+If you have previously set up this application (e.g., standalone Postgres containers, old volumes, or a prior docker-compose deployment), follow these steps before starting fresh.
+
+### Stop and remove old containers
+
+```bash
+# Stop any standalone Postgres containers from earlier setup
+docker stop db-testmeridian 2>/dev/null
+docker rm db-testmeridian 2>/dev/null
+
+# Stop any previous compose deployment
+cd impactmap/impactmap
+docker compose down
+```
+
+### Remove old database volumes
+
+The database volume must be removed if the schema has changed (e.g., new columns, updated seed data). Postgres only runs `schema.sql` on **first initialization** — if the volume already exists, schema changes are ignored.
+
+```bash
+docker compose down -v
+```
+
+> **Warning:** `-v` deletes all data in the database. Only use this when you need a fresh schema.
+
+### Remove old Docker images (optional)
+
+If you want to force a full rebuild (e.g., after changing `requirements.txt` or `Dockerfile`):
+
+```bash
+docker compose down -v --rmi local
+```
+
+### Start fresh
+
+```bash
+docker compose up --build
+```
+
+---
+
+## 4 · Using the Analyzer
+
+### Via Streamlit Dashboard (recommended)
+
+Open http://localhost:8501 in your browser. The dashboard provides an interactive interface for:
+- Scenario analysis
+- System-wide test generation
+- Reverse tracing (component/endpoint/table → scenarios)
+- Git diff impact analysis
+
+### Via CLI (inside the analyzer container)
+
+```bash
+docker compose exec analyzer python analyze.py \
+  --ui /proxy-app/frontend/src \
+  --api /proxy-app/backend \
+  --db-url postgresql://postgres:postgres@db:5432/impactmap \
+  --scenario "User searches for headphones, adds them to the cart, and completes checkout"
+```
+
+### CLI with a pre-built graph
+
+```bash
+# Build the graph once
+docker compose exec analyzer python analyze.py \
+  --ui /proxy-app/frontend/src \
+  --api /proxy-app/backend \
+  --db-url postgresql://postgres:postgres@db:5432/impactmap \
+  --save-graph graph.json
+
+# Analyze scenarios without re-parsing
+docker compose exec analyzer python analyze.py \
+  --graph graph.json \
+  --scenario "User removes an item from the cart"
+```
+
+### CLI Flags
+
+| Flag             | Description                                    |
+|------------------|------------------------------------------------|
+| `--ui PATH`      | React source directory                         |
+| `--api PATH`     | FastAPI / backend source directory              |
+| `--db-url URL`   | PostgreSQL connection string (live introspection)|
+| `--graph PATH`   | Pre-built graph.json (skips parsing)            |
+| `--scenario TEXT` | Test scenario in natural language               |
+| `--save-graph PATH` | Where to write graph.json (default: ./graph.json) |
+| `--output PATH`  | Save analysis JSON to file                      |
+| `--json`         | Print raw JSON instead of pretty output         |
+
+---
+
+## 5 · Running Without Docker
+
+If you prefer to run services locally without Docker, you'll need:
+- **Python 3.11+**
+- **Node 20+**
+- **PostgreSQL 16**
+
+### Database
+
+```bash
+createdb impactmap
+psql impactmap < proxy-app/schema.sql
+```
+
+### Backend
+
 ```bash
 cd proxy-app/backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+# Create an /images directory or symlink to resources/
+ln -s ../../resources /images
 DATABASE_URL=postgresql://localhost/impactmap uvicorn main:app --reload
 ```
 
-**Frontend**
+### Frontend
+
 ```bash
 cd proxy-app/frontend
 npm install
 VITE_API_URL=http://localhost:8000 npm run dev
 ```
 
-Open http://localhost:5173 — you'll see a working shop: browse products,
-add to cart, check out, view order history.
-
----
-
-## 2 · Run the ImpactMap analyzer
-
-### Prerequisites
+### Analyzer
 
 ```bash
-cd impactmap/analyzer
+cd analyzer
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-ant-...
-```
 
-### Option A — Build graph + analyze in one command
+# Streamlit dashboard
+streamlit run dashboard.py
 
-```bash
+# Or CLI
 python analyze.py \
-  --ui     ../proxy-app/frontend/src \
-  --api    ../proxy-app/backend \
-  --schema ../proxy-app/schema.sql \
-  --scenario "User searches for headphones, adds them to the cart, and completes checkout"
-```
-
-This will:
-1. Parse the React source → component→API edges
-2. Parse the FastAPI source → endpoint→table edges
-3. Parse schema.sql → table graph with FK relationships
-4. Write `graph.json` to the current directory
-5. Send the graph + scenario to Claude
-6. Print a pretty terminal analysis
-
-### Option B — Build graph once, reuse it
-
-```bash
-# Build
-python build_graph.py \
-  ../proxy-app/frontend/src \
-  ../proxy-app/backend \
-  ../proxy-app/schema.sql \
-  graph.json
-
-# Analyze (fast, no re-parsing)
-python analyze.py --graph graph.json \
-  --scenario "User removes an item from the cart"
-
-python analyze.py --graph graph.json \
-  --scenario "User checks their order history"
-```
-
-### Option C — Interactive mode
-
-```bash
-python analyze.py --graph graph.json
-# Prompts: "Enter test scenario: "
-```
-
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `--ui PATH` | React source directory |
-| `--api PATH` | FastAPI / backend source directory |
-| `--schema PATH` | schema.sql or schema.prisma |
-| `--graph PATH` | Pre-built graph.json (skips parsing) |
-| `--scenario TEXT` | Test scenario in natural language |
-| `--save-graph PATH` | Where to write graph.json (default: ./graph.json) |
-| `--output PATH` | Save analysis JSON to file |
-| `--json` | Print raw JSON instead of pretty output |
-
----
-
-## 3 · Sample output
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  IMPACTMAP ANALYSIS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-SCENARIO
-  User searches for headphones, adds them to the cart, and checks out.
-
-UI WORKFLOW
-  Step  Component                 Action
-  ───────────────────────────────────────────────────────────────────────
-  1     ProductList               User types "headphones" in search input
-          ↳ GET /products
-  2     ProductCard               User clicks "Add to Cart"
-          ↳ POST /cart/add
-  3     Cart                      User reviews cart, clicks Proceed to Checkout
-          ↳ GET /cart
-  4     Checkout                  User enters address, clicks Place Order
-          ↳ GET /cart
-          ↳ POST /orders
-
-API CALL SEQUENCE
-  1.  GET /products
-      ← ProductList
-      Fetch filtered product list matching "headphones"
-        ├─ READ         products
-
-  2.  POST /cart/add
-      ← ProductCard
-      Add selected product to cart
-        ├─ READ         products
-        ├─ WRITE        cart_items
-
-  3.  GET /cart
-      ← Cart / Checkout
-      Load cart contents with line totals
-        ├─ READ         cart_items
-        ├─ READ         products
-
-  4.  POST /orders
-      ← Checkout
-      Place the order, decrement stock, clear cart
-        ├─ READ         cart_items
-        ├─ WRITE        orders
-        ├─ WRITE        order_items
-        ├─ WRITE        products
-        ├─ WRITE        cart_items
-
-IMPACTED TABLES
-  ├─ products   READ WRITE
-  │     Queried for search results and prices; stock_qty decremented on order
-  │     cols: id, name, description, price, stock_qty, category, created_at
-  ├─ cart_items READ WRITE
-  │     Written when item added; read at checkout; deleted after order placed
-  │     cols: id, user_id, product_id, quantity, added_at
-  ├─ orders     WRITE
-  │     New order row created on POST /orders
-  │     cols: id, user_id, status, total_amount, shipping_addr, created_at
-  └─ order_items WRITE
-        One row per cart item written to preserve the order snapshot
-        cols: id, order_id, product_id, quantity, unit_price
-
-QA CHECKLIST
-  □ Verify search returns correct products when filtering by name
-  □ Verify cart_items quantity increments correctly on duplicate add
-  □ Verify stock_qty decrements by the correct amount after order
-  □ Verify cart_items rows are deleted after order is placed
-  □ Verify order total matches sum of (price × quantity) for all items
-  □ Verify order status is set to "confirmed" immediately
-
-⚠  RISK NOTES
-  POST /orders is not atomic by default with raw SQL — if the server crashes
-  after writing orders but before decrementing stock, inventory will be
-  over-counted. Consider wrapping in a transaction. Also: no payment step
-  means orders are placed without charge validation.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
----
-
-## 4 · Pointing at a real repo
-
-The parsers are generic. To use on your own codebase:
-
-```bash
-python analyze.py \
-  --ui     /path/to/your/react/src \
-  --api    /path/to/your/fastapi/or/express/routes \
-  --schema /path/to/your/schema.sql \
+  --ui ../proxy-app/frontend/src \
+  --api ../proxy-app/backend \
+  --db-url postgresql://localhost/impactmap \
   --scenario "Your scenario here"
 ```
 
-**React**: Works with `.jsx`, `.tsx`, `.js`, `.ts`. Detects imports from any
-file named `client.js/ts`, plus raw `fetch()`/`axios.*()` calls.
+---
 
-**API**: Detects `@app.get`, `@router.post`, etc. (FastAPI/Flask) and
-`router.get()` (Express). Extracts table names from SQL strings and ORM
-patterns. Pass `--schema` so the parser validates table names against the
-real schema.
+## 6 · Troubleshooting
 
-**Schema**: Supports `.sql` (CREATE TABLE statements) and `.prisma` files.
+### Database schema not applied
+
+Postgres only runs init scripts on first startup. If you changed `schema.sql`, remove the volume:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+### Port conflicts
+
+If port 5432 is already in use by another Postgres instance, the `db` service will fail. Stop the conflicting service first:
+
+```bash
+# Find what's using the port
+lsof -i :5432
+
+# Stop it (example: standalone container)
+docker stop <container-name>
+```
+
+### Backend can't connect to database
+
+The backend connects to `db:5432` via Docker's internal network. If you see connection errors:
+1. Ensure the `db` service is running: `docker compose ps`
+2. Check logs: `docker compose logs db`
+3. The database may still be initializing — wait a few seconds and retry
+
+### Images not loading
+
+Ensure the `resources/` directory exists and contains the product images. The backend serves them from `/images/` via the volume mount `./resources:/images`.
+
+### Analyzer API key errors
+
+Ensure `ANTHROPIC_API_KEY` is exported in your shell before running `docker compose up`:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+docker compose up
+```

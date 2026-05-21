@@ -29,27 +29,36 @@ export default function Checkout() {
   };
 
   return (
-    <div className="checkout">
-      <h2>Checkout</h2>
+    <div className="checkout-page">
+      <div className="checkout-shipping">
+        <h2>Shipping Address</h2>
+        <label htmlFor="shipping-addr">Enter your shipping address</label>
+        <textarea
+          id="shipping-addr"
+          rows={4}
+          value={shippingAddr}
+          onChange={(e) => setShippingAddr(e.target.value)}
+          placeholder="123 Main St, City, State, ZIP, Country"
+        />
+      </div>
       <div className="checkout-summary">
         <h3>Order Summary</h3>
         {cart.items.map((item) => (
           <div key={item.product_id} className="summary-item">
-            <span>{item.name} × {item.quantity}</span>
+            <span>{item.name} x{item.quantity}</span>
             <span>${item.line_total}</span>
           </div>
         ))}
-        <div className="summary-total">Total: ${cart.total}</div>
-      </div>
-      <div className="shipping-form">
-        <label>Shipping Address</label>
-        <textarea
-          rows={3}
-          value={shippingAddr}
-          onChange={(e) => setShippingAddr(e.target.value)}
-          placeholder="123 Main St, City, Country"
-        />
-        <button onClick={handlePlaceOrder} disabled={placing}>
+        <hr className="summary-divider" />
+        <div className="summary-total">
+          <span>Order Total</span>
+          <span>${cart.total}</span>
+        </div>
+        <button
+          className="btn-place-order"
+          onClick={handlePlaceOrder}
+          disabled={placing || !shippingAddr.trim()}
+        >
           {placing ? "Placing order..." : "Place Order"}
         </button>
       </div>

@@ -42,6 +42,7 @@ class Product(Base):
     price       = Column(Numeric(10, 2), nullable=False)
     stock_qty   = Column(Integer, nullable=False, default=0)
     category    = Column(String(100))
+    image_url   = Column(String(500))
     created_at  = Column(DateTime, server_default=func.now())
 
     cart_items  = relationship("CartItem", back_populates="product")
