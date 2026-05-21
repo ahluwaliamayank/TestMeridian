@@ -17,6 +17,8 @@ and renders:
 import hashlib
 import json
 import os
+import threading
+import queue
 from pathlib import Path
 
 import streamlit as st
@@ -27,12 +29,22 @@ from analyze import (
     find_scenarios_touching,
     analyze_diff_impact,
 )
+from build_graph import build_graph, save_graph
+from syngen_client import SyngenClient
+from syngen_workflow import run_syngen_workflow
 from diff_impact import (
     find_repo_root,
     get_changed_files,
     categorize_changed_files,
     compute_blast_radius,
 )
+
+
+# ── Synthetic data feature flag ──────────────────────────────────────────────
+SYNGEN_ENABLED = os.environ.get("LINK_SYNTHETIC_DATA", "false").lower() == "true"
+SYNGEN_API_URL = os.environ.get("SYNGEN_API_URL", "https://localhost")
+DCT_API_KEY = os.environ.get("DCT_API_KEY", "")
+SYNGEN_JDBC_DRIVER_ID = os.environ.get("SYNGEN_JDBC_DRIVER_ID", "")
 
 
 # ── System-overview disk cache ───────────────────────────────────────────────
@@ -180,10 +192,53 @@ def build_dot(graph: dict,
 
 # ── Result rendering ─────────────────────────────────────────────────────────
 
-def render_analysis(result: dict):
-    st.markdown(f"#### Scenario")
-    st.write(result.get("scenario_summary", ""))
+def _drain_syngen_queue():
+    """Pull all pending messages from the background thread queue into session state."""
+    q = st.session_state.get("syngen_queue")
+    if q is None:
+        return
+    while True:
+        try:
+            text, status = q.get_nowait()
+            st.session_state["syngen_messages"].append({"role": "assistant", "text": text, "status": status})
+        except queue.Empty:
+            break
 
+
+def _start_syngen_thread(table_names):
+    """Launch the syngen workflow in a background thread."""
+    msg_queue = queue.Queue()
+    st.session_state["syngen_queue"] = msg_queue
+    st.session_state["syngen_messages"] = []
+    st.session_state["syngen_running"] = True
+
+    def on_message(text, status):
+        msg_queue.put((text, status))
+
+    def _run():
+        try:
+            client = SyngenClient(SYNGEN_API_URL, DCT_API_KEY)
+            run_syngen_workflow(
+                client=client,
+                jdbc_driver_id=SYNGEN_JDBC_DRIVER_ID,
+                db_host="host.docker.internal",
+                db_port=5435,
+                db_user="postgres",
+                db_password="postgres",
+                db_name="impactmap",
+                db_schema="public",
+                tables=table_names,
+                on_message=on_message,
+            )
+        finally:
+            msg_queue.put(("__DONE__", "done"))
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    st.session_state["syngen_thread"] = t
+
+
+def render_analysis(result: dict):
     # UI workflow
     workflow = result.get("ui_workflow", [])
     if workflow:
@@ -239,6 +294,19 @@ def render_analysis(result: dict):
         else:
             st.success(f"**No pre-existing data needed.** {desc}")
 
+        if SYNGEN_ENABLED and needs:
+            impacted = result.get("impacted_tables", [])
+            table_names = [t.get("table", "") for t in impacted if t.get("table")]
+            if table_names and st.button(
+                "Generate Data",
+                type="primary",
+                key="syngen_generate",
+            ):
+                st.session_state["syngen_panel_open"] = True
+                st.session_state["syngen_tables"] = table_names
+                _start_syngen_thread(table_names)
+                st.rerun()
+
     # Suggested test cases
     cases = result.get("test_cases", [])
     if cases:
@@ -287,6 +355,9 @@ def render_full_result(graph: dict, result: dict):
             + ", ".join(f"`{u}`" for u in unknown)
         )
 
+    st.markdown("#### Scenario")
+    st.write(result.get("scenario_summary", ""))
+
     st.markdown("#### Dependency graph")
     dot = build_dot(
         graph,
@@ -294,7 +365,9 @@ def render_full_result(graph: dict, result: dict):
         endpoints_touched & known_endpoints,
         tables_touched & known_tables,
     )
+    st.markdown('<div style="max-width: 60%;">', unsafe_allow_html=True)
     st.graphviz_chart(dot, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("#### Analysis")
     render_analysis(result)
@@ -348,31 +421,99 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Custom button color ──────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Sidebar: slightly smaller text */
+section[data-testid="stSidebar"] h1 { font-size: 1.4rem !important; }
+section[data-testid="stSidebar"] h2 { font-size: 1.1rem !important; }
+section[data-testid="stSidebar"] h3 { font-size: 0.95rem !important; }
+section[data-testid="stSidebar"] button { font-size: 12px !important; }
+section[data-testid="stSidebar"] input,
+section[data-testid="stSidebar"] textarea { font-size: 12px !important; }
+
+button[kind="primary"] {
+    background-color: #5033ff !important;
+    border-color: #5033ff !important;
+}
+button[kind="primary"]:hover {
+    background-color: #3d22e6 !important;
+    border-color: #3d22e6 !important;
+}
+
+
+</style>
+
+""", unsafe_allow_html=True)
+
 st.title("TestMeridian")
 st.caption("Trace a test scenario through UI → API → DB and surface test data requirements + cases.")
 
 # Sidebar: graph + diagnostics
+GRAPH_PATH = "graph.json"
+
 with st.sidebar:
-    st.header("Graph")
-    default_path = "graph.json"
-    graph_path = st.text_input("Path to graph.json", value=default_path)
+    # Connected Applications
+    st.header("Connected Applications")
+    st.markdown("**Application**")
+    st.selectbox("Application", ["Amazone"], key="connected_app", label_visibility="collapsed")
+
+    # Load graph
     graph: dict | None = None
-    if Path(graph_path).exists():
+    if Path(GRAPH_PATH).exists():
         try:
-            graph = json.loads(Path(graph_path).read_text())
-            st.success(
-                f"Loaded **{len(graph['components'])}** components · "
-                f"**{len(graph['endpoints'])}** endpoints · "
-                f"**{len(graph['tables'])}** tables"
-            )
+            graph = json.loads(Path(GRAPH_PATH).read_text())
         except json.JSONDecodeError as e:
-            st.error(f"Failed to parse {graph_path}: {e}")
-    else:
-        st.warning(
-            f"`{graph_path}` not found.\n\n"
-            "Build it first with:\n"
-            "```\npython analyze.py --ui … --api … --db-url …\n```"
+            st.error(f"Failed to parse graph: {e}")
+
+    st.markdown("**Application Profile**")
+
+    if graph:
+        st.success(
+            f"Components: {len(graph['components'])}  \n"
+            f"Endpoints: {len(graph['endpoints'])}  \n"
+            f"Tables: {len(graph['tables'])}"
         )
+        st.markdown(
+            '<span style="font-size: 12px;">Profile loaded for application. </span>'
+            '<a href="?rebuild=1" target="_self" style="font-size: 12px; color: #5033ff; text-decoration: none;">Rebuild Profile</a>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<span style="font-size: 12px;">No profile found for application. </span>'
+            '<a href="?rebuild=1" target="_self" style="font-size: 12px; color: #5033ff; text-decoration: none;">Build Profile</a>',
+            unsafe_allow_html=True,
+        )
+
+    # Detect rebuild/build link click from query param
+    if st.query_params.get("rebuild"):
+        st.session_state["show_build_graph"] = True
+        st.query_params.clear()
+
+    show_build = st.session_state.get("show_build_graph", False)
+    if show_build:
+        with st.container():
+            st.markdown(
+                '<div style="padding-left: 12px;">', unsafe_allow_html=True
+            )
+            st.markdown("**Build Profile**")
+            ui_path = st.text_input("UI source path", value="/proxy-app/frontend/src")
+            api_path = st.text_input("API source path", value="/proxy-app/backend")
+            db_url = st.text_input(
+                "Database URL",
+                value=os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@db:5432/impactmap"),
+            )
+            if st.button("Build Profile", type="primary", use_container_width=True, key="build_graph_btn"):
+                with st.spinner("Parsing UI, API, and database..."):
+                    try:
+                        built_graph = build_graph(ui_path, api_path, db_url)
+                        save_graph(built_graph, GRAPH_PATH)
+                        st.session_state["show_build_graph"] = False
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to build graph: {e}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.header("Anthropic API key")
@@ -768,3 +909,161 @@ with tab_diff:
                 st.markdown("---")
                 st.markdown(f"### Drill-down: {drill.get('title', '')}")
                 render_full_result(graph, drill["result"])
+
+# ── Synthetic data agent panel (right 20%) ───────────────────────────────────
+if SYNGEN_ENABLED and st.session_state.get("syngen_panel_open"):
+    # Shrink main content to 80% and fix chat panel on the right 20%
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+    .main .block-container { max-width: 80% !important; margin-right: 20% !important; }
+
+    .syngen-chat-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 20%;
+        height: 100vh;
+        background: #ffffff;
+        border-left: 1px solid #ececf1;
+        display: flex;
+        flex-direction: column;
+        z-index: 9999;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .syngen-chat-header {
+        padding: 14px 16px;
+        border-bottom: 1px solid #ececf1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .syngen-chat-header h4 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: #1a1a1a;
+        letter-spacing: -0.01em;
+    }
+    .syngen-chat-close {
+        background: none;
+        border: none;
+        font-size: 18px;
+        color: #8e8ea0;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+    .syngen-chat-close:hover { background: #f7f7f8; color: #1a1a1a; }
+    .syngen-chat-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 16px;
+    }
+    .syngen-bubble {
+        margin: 6px 0;
+        padding: 8px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        max-width: 95%;
+        word-wrap: break-word;
+    }
+    .syngen-bubble-assistant {
+        background: #f7f7f8;
+        color: #1a1a1a;
+        border-bottom-left-radius: 4px;
+    }
+    .syngen-bubble-user {
+        background: #5033ff;
+        color: #ffffff;
+        margin-left: auto;
+        border-bottom-right-radius: 4px;
+    }
+    .syngen-bubble-error {
+        background: #fef2f2;
+        color: #dc2626;
+        border-bottom-left-radius: 4px;
+    }
+    .syngen-bubble-success {
+        background: #f0fdf4;
+        color: #15803d;
+        border-bottom-left-radius: 4px;
+    }
+    .syngen-bubble .icon { margin-right: 4px; }
+    .syngen-typing {
+        display: inline-block;
+        font-size: 13px;
+        color: #8e8ea0;
+    }
+    .syngen-typing::after {
+        content: '';
+        animation: typingDots 1.2s steps(4, end) infinite;
+    }
+    @keyframes typingDots {
+        0% { content: ''; }
+        25% { content: '.'; }
+        50% { content: '..'; }
+        75% { content: '...'; }
+        100% { content: ''; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Drain messages from background thread
+    _drain_syngen_queue()
+
+    messages = st.session_state.get("syngen_messages", [])
+    if messages and messages[-1].get("text") == "__DONE__":
+        st.session_state["syngen_running"] = False
+        messages.pop()
+
+    # Build chat bubbles
+    bubbles_html = ""
+    for msg in messages:
+        role = msg.get("role", "assistant")
+        status = msg.get("status", "")
+        text = msg.get("text", "").replace("<", "&lt;").replace(">", "&gt;")
+
+        if role == "user":
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-user">{text}</div>'
+        elif status == "error":
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-error"><span class="icon">✗</span> {text}</div>'
+        elif status == "done":
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-success"><span class="icon">✓</span> {text}</div>'
+        else:
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-assistant"><span class="icon">⏳</span> {text}</div>'
+
+    if st.session_state.get("syngen_running"):
+        bubbles_html += '<div class="syngen-bubble syngen-bubble-assistant"><span class="syngen-typing">Working</span></div>'
+
+    st.markdown(f"""
+    <div class="syngen-chat-panel">
+        <div class="syngen-chat-header">
+            <h4>Data Generation Agent</h4>
+        </div>
+        <div class="syngen-chat-body" id="syngen-chat-scroll">
+            {bubbles_html}
+        </div>
+    </div>
+    <script>
+        var el = parent.document.getElementById('syngen-chat-scroll');
+        if (el) el.scrollTop = el.scrollHeight;
+    </script>
+    """, unsafe_allow_html=True)
+
+    # Close button in sidebar
+    with st.sidebar:
+        st.markdown("---")
+        if st.button("Close Data Agent", key="syngen_close", use_container_width=True):
+            st.session_state["syngen_panel_open"] = False
+            st.session_state["syngen_running"] = False
+            st.session_state["syngen_messages"] = []
+            st.rerun()
+
+    # Auto-refresh while running
+    if st.session_state.get("syngen_running"):
+        import time as _time
+        _time.sleep(1.5)
+        st.rerun()

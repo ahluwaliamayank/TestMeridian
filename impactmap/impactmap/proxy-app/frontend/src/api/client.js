@@ -7,6 +7,9 @@ import axios from "axios";
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const api = axios.create({ baseURL: BASE });
 
+// ── Images ──────────────────────────────────────────────────
+export const getImageUrl = (path) => `${BASE}${path}`;
+
 // ── Products ─────────────────────────────────────────────────
 export const fetchProducts = (params = {}) =>
   api.get("/products", { params });

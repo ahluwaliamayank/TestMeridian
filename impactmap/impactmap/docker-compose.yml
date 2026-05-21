@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: impactmap
+    ports:
+      - "5435:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./proxy-app/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+
+  backend:
+    build: ./proxy-app/backend
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/impactmap
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./proxy-app/backend:/app
+      - ./resources:/images
+
+  frontend:
+    build: ./proxy-app/frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    volumes:
+      - ./proxy-app/frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+
+  analyzer:
+    build: ./analyzer
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/impactmap
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LINK_SYNTHETIC_DATA: ${LINK_SYNTHETIC_DATA:-false}
+      SYNGEN_API_URL: ${SYNGEN_API_URL:-https://host.docker.internal}
+      DCT_API_KEY: ${DCT_API_KEY}
+      SYNGEN_JDBC_DRIVER_ID: ${SYNGEN_JDBC_DRIVER_ID}
+    ports:
+      - "8501:8501"
+    depends_on:
+      - db
+    volumes:
+      - ./analyzer:/app
+      - ./proxy-app/frontend/src:/proxy-app/frontend/src
+      - ./proxy-app/backend:/proxy-app/backend
+
+volumes:
+  pg_data:

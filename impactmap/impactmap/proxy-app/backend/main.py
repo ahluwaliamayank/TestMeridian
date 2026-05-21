@@ -11,6 +11,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/images", StaticFiles(directory="/images"), name="images")
 
 DEMO_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -50,6 +53,7 @@ def list_products(
         {
             "id": str(p.id), "name": p.name, "description": p.description,
             "price": float(p.price), "stock_qty": p.stock_qty, "category": p.category,
+            "image_url": p.image_url,
         }
         for p in products
     ]
@@ -64,6 +68,7 @@ def get_product(product_id: str, db: Session = Depends(get_db)):
     return {
         "id": str(product.id), "name": product.name, "description": product.description,
         "price": float(product.price), "stock_qty": product.stock_qty, "category": product.category,
+        "image_url": product.image_url,
     }
 
 

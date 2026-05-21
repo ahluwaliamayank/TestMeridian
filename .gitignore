@@ -1,7 +1,37 @@
+# macOS
 .DS_Store
-__pycache__
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Virtual environments
+venv/
+.venv/
+virtual_environment/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project-specific
 graph.json
 virtual_environment
 make_deck.py
 *.pptx
-
+.system_overview_cache.json
+impactmap/impactmap/analyzer/.system_overview_cache.json
+docs/*
+syngen/*
+resources/logo.svg
