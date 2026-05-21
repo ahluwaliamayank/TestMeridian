@@ -140,14 +140,11 @@ class SyngenClient:
             "is_reference": True,
             "is_target": True,
             "database_config": {
-                "host": host,
-                "port": port,
+                "jdbc_url": f"jdbc:postgresql://{host}:{port}/{database_name}",
+                "schema_name": schema_name,
                 "authentication_type": "USERNAME_PASSWORD",
                 "username": username,
                 "password": password,
-                "database_name": database_name,
-                "schema_name": schema_name,
-                "jdbc_url": f"jdbc:postgresql://{host}:{port}/{database_name}",
             },
         }
         resp = self._request("POST", "/synthetic/connectors", json=body)
@@ -241,7 +238,7 @@ class SyngenClient:
         self, dataset_id: str, overrides: list[dict]
     ) -> dict:
         log.debug("Updating records count: dataset_id=%s, overrides=%s", dataset_id, overrides)
-        body = {"structure_overrides": overrides}
+        body = {"structures": overrides}
         return self._request(
             "PATCH", f"/synthetic/datasets/{dataset_id}/records-count", json=body
         )
@@ -255,16 +252,61 @@ class SyngenClient:
         log.debug("Found %d dataset structure(s)", len(items))
         return items
 
+    # ── Generators ────────────────────────────────────────────
+
+    def search_generators(self, name: str = None) -> list[dict]:
+        body = {}
+        if name:
+            body = {"filter_expression": f"name eq '{name}'"}
+        log.debug("Searching generators: %s", body)
+        resp = self._request("POST", "/synthetic/generators/search", json=body)
+        items = resp.get("items", [])
+        log.debug("Found %d generator(s)", len(items))
+        return items
+
+    def create_generator(self, name: str, framework_id: str, config: dict) -> dict:
+        log.debug("Creating generator instance: name=%s, framework_id=%s", name, framework_id)
+        body = {
+            "name": name,
+            "framework_id": framework_id,
+            "config": config,
+        }
+        return self._request("POST", "/synthetic/generators", json=body)
+
+    # ── Fields ────────────────────────────────────────────────
+
+    def get_dataset_fields(self, dataset_id: str) -> list[dict]:
+        log.debug("Getting dataset fields: dataset_id=%s", dataset_id)
+        resp = self._request(
+            "POST", f"/synthetic/datasets/{dataset_id}/fields/search", json={}
+        )
+        items = resp.get("items", [])
+        log.debug("Found %d field(s)", len(items))
+        return items
+
+    def patch_field(self, dataset_id: str, field_id: str, patch: dict) -> dict:
+        log.debug("Patching field: dataset_id=%s, field_id=%s, patch=%s",
+                   dataset_id, field_id, patch)
+        return self._request(
+            "PATCH", f"/synthetic/datasets/{dataset_id}/fields/{field_id}", json=patch
+        )
+
     # ── Jobs ─────────────────────────────────────────────────
 
     def create_job(
-        self, name: str, dataset_id: str, target_connector_ids: list[str]
+        self, name: str, dataset_id: str, reference_connector_id: str, target_connector_id: str
     ) -> dict:
-        log.debug("Creating job: name=%s, dataset_id=%s, targets=%s", name, dataset_id, target_connector_ids)
+        log.debug("Creating job: name=%s, dataset_id=%s, ref=%s, target=%s",
+                   name, dataset_id, reference_connector_id, target_connector_id)
         body = {
             "name": name,
             "dataset_id": dataset_id,
-            "target_connector_ids": target_connector_ids,
+            "target_mappings": [
+                {
+                    "reference_connector_id": reference_connector_id,
+                    "target_connector_id": target_connector_id,
+                }
+            ],
         }
         resp = self._request("POST", "/synthetic/jobs", json=body)
         log.debug("Job created: id=%s", resp.get("id"))

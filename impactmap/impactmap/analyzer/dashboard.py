@@ -17,6 +17,8 @@ and renders:
 import hashlib
 import json
 import os
+import threading
+import queue
 from pathlib import Path
 
 import streamlit as st
@@ -190,38 +192,53 @@ def build_dot(graph: dict,
 
 # ── Result rendering ─────────────────────────────────────────────────────────
 
-def render_syngen_panel():
-    """Render the slide-out conversational panel for synthetic data generation."""
-    if not st.session_state.get("syngen_panel_open"):
+def _drain_syngen_queue():
+    """Pull all pending messages from the background thread queue into session state."""
+    q = st.session_state.get("syngen_queue")
+    if q is None:
         return
+    while True:
+        try:
+            text, status = q.get_nowait()
+            st.session_state["syngen_messages"].append({"role": "assistant", "text": text, "status": status})
+        except queue.Empty:
+            break
 
-    messages = st.session_state.get("syngen_messages", [])
-    msgs_html = ""
-    for text, status in messages:
-        msgs_html += f'<div class="syngen-msg {status}">{text}</div>'
 
-    st.markdown(
-        f"""
-        <div class="syngen-panel">
-            <div class="syngen-panel-header">
-                <span>Generate Synthetic Data</span>
-                <button class="syngen-panel-close" onclick="
-                    this.closest('.syngen-panel').style.display='none';
-                ">✕</button>
-            </div>
-            <div class="syngen-panel-body">
-                {msgs_html if msgs_html else '<div class="syngen-msg running">Initializing...</div>'}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+def _start_syngen_thread(table_names):
+    """Launch the syngen workflow in a background thread."""
+    msg_queue = queue.Queue()
+    st.session_state["syngen_queue"] = msg_queue
+    st.session_state["syngen_messages"] = []
+    st.session_state["syngen_running"] = True
+
+    def on_message(text, status):
+        msg_queue.put((text, status))
+
+    def _run():
+        try:
+            client = SyngenClient(SYNGEN_API_URL, DCT_API_KEY)
+            run_syngen_workflow(
+                client=client,
+                jdbc_driver_id=SYNGEN_JDBC_DRIVER_ID,
+                db_host="host.docker.internal",
+                db_port=5435,
+                db_user="postgres",
+                db_password="postgres",
+                db_name="impactmap",
+                db_schema="public",
+                tables=table_names,
+                on_message=on_message,
+            )
+        finally:
+            msg_queue.put(("__DONE__", "done"))
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    st.session_state["syngen_thread"] = t
 
 
 def render_analysis(result: dict):
-    st.markdown(f"#### Scenario")
-    st.write(result.get("scenario_summary", ""))
-
     # UI workflow
     workflow = result.get("ui_workflow", [])
     if workflow:
@@ -286,24 +303,8 @@ def render_analysis(result: dict):
                 key="syngen_generate",
             ):
                 st.session_state["syngen_panel_open"] = True
-                st.session_state["syngen_messages"] = []
-
-                def on_message(text, status):
-                    st.session_state["syngen_messages"].append((text, status))
-
-                client = SyngenClient(SYNGEN_API_URL, DCT_API_KEY)
-                run_syngen_workflow(
-                    client=client,
-                    jdbc_driver_id=SYNGEN_JDBC_DRIVER_ID,
-                    db_host="host.docker.internal",
-                    db_port=5435,
-                    db_user="postgres",
-                    db_password="postgres",
-                    db_name="impactmap",
-                    db_schema="public",
-                    tables=table_names,
-                    on_message=on_message,
-                )
+                st.session_state["syngen_tables"] = table_names
+                _start_syngen_thread(table_names)
                 st.rerun()
 
     # Suggested test cases
@@ -354,6 +355,9 @@ def render_full_result(graph: dict, result: dict):
             + ", ".join(f"`{u}`" for u in unknown)
         )
 
+    st.markdown("#### Scenario")
+    st.write(result.get("scenario_summary", ""))
+
     st.markdown("#### Dependency graph")
     dot = build_dot(
         graph,
@@ -361,7 +365,9 @@ def render_full_result(graph: dict, result: dict):
         endpoints_touched & known_endpoints,
         tables_touched & known_tables,
     )
+    st.markdown('<div style="max-width: 60%;">', unsafe_allow_html=True)
     st.graphviz_chart(dot, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("#### Analysis")
     render_analysis(result)
@@ -435,55 +441,6 @@ button[kind="primary"]:hover {
     border-color: #3d22e6 !important;
 }
 
-/* Slide-out panel */
-.syngen-panel {
-    position: fixed;
-    top: 0;
-    right: 0;
-    width: 420px;
-    height: 100vh;
-    background: #ffffff;
-    border-left: 1px solid #e5e7eb;
-    box-shadow: -4px 0 12px rgba(0,0,0,0.08);
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    font-family: inherit;
-}
-.syngen-panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid #e5e7eb;
-    font-weight: 600;
-    font-size: 15px;
-}
-.syngen-panel-close {
-    cursor: pointer;
-    font-size: 20px;
-    color: #6b7280;
-    background: none;
-    border: none;
-    padding: 4px 8px;
-}
-.syngen-panel-close:hover {
-    color: #111827;
-}
-.syngen-panel-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px 20px;
-}
-.syngen-msg {
-    padding: 8px 0;
-    font-size: 13px;
-    line-height: 1.5;
-    border-bottom: 1px solid #f3f4f6;
-}
-.syngen-msg.done { color: #059669; }
-.syngen-msg.error { color: #dc2626; }
-.syngen-msg.running { color: #6b7280; }
 
 </style>
 
@@ -953,6 +910,160 @@ with tab_diff:
                 st.markdown(f"### Drill-down: {drill.get('title', '')}")
                 render_full_result(graph, drill["result"])
 
-# ── Synthetic data slide-out panel ───────────────────────────────────────────
-if SYNGEN_ENABLED:
-    render_syngen_panel()
+# ── Synthetic data agent panel (right 20%) ───────────────────────────────────
+if SYNGEN_ENABLED and st.session_state.get("syngen_panel_open"):
+    # Shrink main content to 80% and fix chat panel on the right 20%
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+    .main .block-container { max-width: 80% !important; margin-right: 20% !important; }
+
+    .syngen-chat-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 20%;
+        height: 100vh;
+        background: #ffffff;
+        border-left: 1px solid #ececf1;
+        display: flex;
+        flex-direction: column;
+        z-index: 9999;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .syngen-chat-header {
+        padding: 14px 16px;
+        border-bottom: 1px solid #ececf1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .syngen-chat-header h4 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: #1a1a1a;
+        letter-spacing: -0.01em;
+    }
+    .syngen-chat-close {
+        background: none;
+        border: none;
+        font-size: 18px;
+        color: #8e8ea0;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+    .syngen-chat-close:hover { background: #f7f7f8; color: #1a1a1a; }
+    .syngen-chat-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 16px;
+    }
+    .syngen-bubble {
+        margin: 6px 0;
+        padding: 8px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        max-width: 95%;
+        word-wrap: break-word;
+    }
+    .syngen-bubble-assistant {
+        background: #f7f7f8;
+        color: #1a1a1a;
+        border-bottom-left-radius: 4px;
+    }
+    .syngen-bubble-user {
+        background: #5033ff;
+        color: #ffffff;
+        margin-left: auto;
+        border-bottom-right-radius: 4px;
+    }
+    .syngen-bubble-error {
+        background: #fef2f2;
+        color: #dc2626;
+        border-bottom-left-radius: 4px;
+    }
+    .syngen-bubble-success {
+        background: #f0fdf4;
+        color: #15803d;
+        border-bottom-left-radius: 4px;
+    }
+    .syngen-bubble .icon { margin-right: 4px; }
+    .syngen-typing {
+        display: inline-block;
+        font-size: 13px;
+        color: #8e8ea0;
+    }
+    .syngen-typing::after {
+        content: '';
+        animation: typingDots 1.2s steps(4, end) infinite;
+    }
+    @keyframes typingDots {
+        0% { content: ''; }
+        25% { content: '.'; }
+        50% { content: '..'; }
+        75% { content: '...'; }
+        100% { content: ''; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Drain messages from background thread
+    _drain_syngen_queue()
+
+    messages = st.session_state.get("syngen_messages", [])
+    if messages and messages[-1].get("text") == "__DONE__":
+        st.session_state["syngen_running"] = False
+        messages.pop()
+
+    # Build chat bubbles
+    bubbles_html = ""
+    for msg in messages:
+        role = msg.get("role", "assistant")
+        status = msg.get("status", "")
+        text = msg.get("text", "").replace("<", "&lt;").replace(">", "&gt;")
+
+        if role == "user":
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-user">{text}</div>'
+        elif status == "error":
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-error"><span class="icon">✗</span> {text}</div>'
+        elif status == "done":
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-success"><span class="icon">✓</span> {text}</div>'
+        else:
+            bubbles_html += f'<div class="syngen-bubble syngen-bubble-assistant"><span class="icon">⏳</span> {text}</div>'
+
+    if st.session_state.get("syngen_running"):
+        bubbles_html += '<div class="syngen-bubble syngen-bubble-assistant"><span class="syngen-typing">Working</span></div>'
+
+    st.markdown(f"""
+    <div class="syngen-chat-panel">
+        <div class="syngen-chat-header">
+            <h4>Data Generation Agent</h4>
+        </div>
+        <div class="syngen-chat-body" id="syngen-chat-scroll">
+            {bubbles_html}
+        </div>
+    </div>
+    <script>
+        var el = parent.document.getElementById('syngen-chat-scroll');
+        if (el) el.scrollTop = el.scrollHeight;
+    </script>
+    """, unsafe_allow_html=True)
+
+    # Close button in sidebar
+    with st.sidebar:
+        st.markdown("---")
+        if st.button("Close Data Agent", key="syngen_close", use_container_width=True):
+            st.session_state["syngen_panel_open"] = False
+            st.session_state["syngen_running"] = False
+            st.session_state["syngen_messages"] = []
+            st.rerun()
+
+    # Auto-refresh while running
+    if st.session_state.get("syngen_running"):
+        import time as _time
+        _time.sleep(1.5)
+        st.rerun()
