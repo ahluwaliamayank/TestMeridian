@@ -1,24 +1,65 @@
-# ImpactMap
+# TestMeridian — ImpactMap
 
-Two things in one repo:
+TestMeridian is an intelligent test impact analysis tool. It statically parses a real application's UI code, API code, and database schema, builds a dependency graph, and uses Claude LLM to generate targeted test scenarios, trace impact paths, and assess risk from code changes.
 
-1. **`proxy-app/`** — A simple e-commerce app (React + FastAPI + Postgres) that acts as the target system to analyze.
-2. **`analyzer/`** — A Python CLI tool that parses the proxy-app's UI code, API code, and DB schema to build a dependency graph, then accepts a natural language scenario and returns the UI workflow + impacted tables.
+## What It Does
 
-## Structure
+Given a plain-English test scenario, TestMeridian tells you:
+
+- **Which UI components** to exercise and in what order
+- **Which API endpoints** fire and their sequence
+- **Which database tables** get touched (READ/WRITE) and why
+- **Suggested test cases** with data requirements and risk notes
+
+## Project Structure
 
 ```
 impactmap/
-├── proxy-app/
-│   ├── frontend/        # React app (Vite)
-│   ├── backend/         # FastAPI app
-│   ├── docker-compose.yml
-│   └── .env.example
-└── analyzer/
-    ├── parse_ui.py       # Parses React components for API calls
-    ├── parse_api.py      # Parses FastAPI routes for ORM/table usage
-    ├── parse_schema.py   # Parses SQL schema for tables + FK relations
-    ├── build_graph.py    # Assembles graph.json
-    ├── analyze.py        # LLM scenario analyzer (main CLI entrypoint)
-    └── requirements.txt
+├── docker-compose.yml         # Orchestrates all services
+├── resources/                 # Product images + logo
+├── proxy-app/                 # Sample e-commerce app (analysis target)
+│   ├── frontend/              # React (Vite) SPA
+│   ├── backend/               # FastAPI + SQLAlchemy ORM
+│   └── schema.sql             # Postgres DDL + seed data
+└── analyzer/                  # TestMeridian analysis tool
+    ├── analyze.py             # CLI: scenario analysis, reverse trace, diff impact
+    ├── dashboard.py           # Streamlit web dashboard
+    ├── build_graph.py         # Assembles dependency graph
+    ├── parse_ui.py            # React/JSX parser (tree-sitter)
+    ├── parse_api.py           # FastAPI parser (tree-sitter + ast)
+    ├── introspect_db.py       # Live Postgres introspection
+    └── diff_impact.py         # Git diff → blast radius analysis
 ```
+
+## Quick Start
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+cd impactmap/impactmap
+docker compose up --build
+```
+
+| Service   | URL                   |
+|-----------|-----------------------|
+| Frontend  | http://localhost:5173 |
+| Backend   | http://localhost:8000 |
+| Analyzer  | http://localhost:8501 |
+| Database  | localhost:5432        |
+
+## Analysis Modes
+
+- **Scenario Analysis** — Describe a user flow, get the full impact trace
+- **System Overview** — Auto-generate feature areas and test cases for the entire system
+- **Reverse Trace** — Pick a component, endpoint, or table and find all scenarios that touch it
+- **Diff Impact** — Point at a git ref, get risk-ranked test scenarios for your changes
+
+## Deployment
+
+For detailed setup, cleanup, and troubleshooting instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## Tech Stack
+
+- **Analyzer:** Python, tree-sitter, Anthropic Claude API, Streamlit
+- **Backend:** FastAPI, SQLAlchemy, PostgreSQL
+- **Frontend:** React, React Router, Axios, Vite
+- **Infrastructure:** Docker Compose

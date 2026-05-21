@@ -27,6 +27,7 @@ from analyze import (
     find_scenarios_touching,
     analyze_diff_impact,
 )
+from build_graph import build_graph, save_graph
 from diff_impact import (
     find_repo_root,
     get_changed_files,
@@ -348,31 +349,98 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Custom button color ──────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Sidebar: slightly smaller text */
+section[data-testid="stSidebar"] h1 { font-size: 1.4rem !important; }
+section[data-testid="stSidebar"] h2 { font-size: 1.1rem !important; }
+section[data-testid="stSidebar"] h3 { font-size: 0.95rem !important; }
+section[data-testid="stSidebar"] button { font-size: 12px !important; }
+section[data-testid="stSidebar"] input,
+section[data-testid="stSidebar"] textarea { font-size: 12px !important; }
+
+button[kind="primary"] {
+    background-color: #5033ff !important;
+    border-color: #5033ff !important;
+}
+button[kind="primary"]:hover {
+    background-color: #3d22e6 !important;
+    border-color: #3d22e6 !important;
+}
+
+</style>
+
+""", unsafe_allow_html=True)
+
 st.title("TestMeridian")
 st.caption("Trace a test scenario through UI → API → DB and surface test data requirements + cases.")
 
 # Sidebar: graph + diagnostics
+GRAPH_PATH = "graph.json"
+
 with st.sidebar:
-    st.header("Graph")
-    default_path = "graph.json"
-    graph_path = st.text_input("Path to graph.json", value=default_path)
+    # Connected Applications
+    st.header("Connected Applications")
+    st.markdown("**Application**")
+    st.selectbox("Application", ["ImpactStore"], key="connected_app", label_visibility="collapsed")
+
+    # Load graph
     graph: dict | None = None
-    if Path(graph_path).exists():
+    if Path(GRAPH_PATH).exists():
         try:
-            graph = json.loads(Path(graph_path).read_text())
-            st.success(
-                f"Loaded **{len(graph['components'])}** components · "
-                f"**{len(graph['endpoints'])}** endpoints · "
-                f"**{len(graph['tables'])}** tables"
-            )
+            graph = json.loads(Path(GRAPH_PATH).read_text())
         except json.JSONDecodeError as e:
-            st.error(f"Failed to parse {graph_path}: {e}")
-    else:
-        st.warning(
-            f"`{graph_path}` not found.\n\n"
-            "Build it first with:\n"
-            "```\npython analyze.py --ui … --api … --db-url …\n```"
+            st.error(f"Failed to parse graph: {e}")
+
+    st.markdown("**Application Profile**")
+
+    if graph:
+        st.success(
+            f"Components: {len(graph['components'])}  \n"
+            f"Endpoints: {len(graph['endpoints'])}  \n"
+            f"Tables: {len(graph['tables'])}"
         )
+        st.markdown(
+            '<span style="font-size: 12px;">Profile loaded for application. </span>'
+            '<a href="?rebuild=1" target="_self" style="font-size: 12px; color: #5033ff; text-decoration: none;">Rebuild Profile</a>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<span style="font-size: 12px;">No profile found for application. </span>'
+            '<a href="?rebuild=1" target="_self" style="font-size: 12px; color: #5033ff; text-decoration: none;">Build Profile</a>',
+            unsafe_allow_html=True,
+        )
+
+    # Detect rebuild/build link click from query param
+    if st.query_params.get("rebuild"):
+        st.session_state["show_build_graph"] = True
+        st.query_params.clear()
+
+    show_build = st.session_state.get("show_build_graph", False)
+    if show_build:
+        with st.container():
+            st.markdown(
+                '<div style="padding-left: 12px;">', unsafe_allow_html=True
+            )
+            st.markdown("**Build Profile**")
+            ui_path = st.text_input("UI source path", value="/proxy-app/frontend/src")
+            api_path = st.text_input("API source path", value="/proxy-app/backend")
+            db_url = st.text_input(
+                "Database URL",
+                value=os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@db:5432/impactmap"),
+            )
+            if st.button("Build Profile", type="primary", use_container_width=True, key="build_graph_btn"):
+                with st.spinner("Parsing UI, API, and database..."):
+                    try:
+                        built_graph = build_graph(ui_path, api_path, db_url)
+                        save_graph(built_graph, GRAPH_PATH)
+                        st.session_state["show_build_graph"] = False
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to build graph: {e}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.header("Anthropic API key")

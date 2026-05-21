@@ -27,5 +27,8 @@ virtual_environment/
 
 # Project-specific
 graph.json
-
+.system_overview_cache.json
+impactmap/impactmap/analyzer/.system_overview_cache.json
 docs/*
+
+syngen/*

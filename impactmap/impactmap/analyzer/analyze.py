@@ -177,7 +177,7 @@ def analyze_scenario(graph: dict, scenario: str) -> dict:
 
     print(dim("\n  Analyzing..."), end="", flush=True)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=3500,
         system=system_prompt,
         messages=[{"role": "user", "content": f"Test scenario: {scenario}"}],
@@ -251,7 +251,7 @@ def analyze_system(graph: dict) -> dict:
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=4000,
         system=_system_overview_prompt(graph),
         messages=[{"role": "user", "content": "Generate the system-wide test overview."}],
@@ -309,7 +309,7 @@ def find_scenarios_touching(graph: dict, target_type: str, target_id: str) -> di
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=2500,
         system=_reverse_trace_prompt(graph, target_type, target_id),
         messages=[{"role": "user", "content": f"Find scenarios touching {target_type} {target_id}."}],
@@ -397,7 +397,7 @@ def analyze_diff_impact(graph: dict, diff_summary: dict) -> dict:
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=3500,
         system=_diff_impact_prompt(graph, diff_summary),
         messages=[{
