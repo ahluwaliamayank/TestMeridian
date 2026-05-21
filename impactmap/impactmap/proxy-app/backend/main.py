@@ -229,7 +229,7 @@ def list_orders(db: Session = Depends(get_db)):
 @app.get("/orders/{order_id}")
 def get_order(order_id: str, db: Session = Depends(get_db)):
     """Fetch a single order with its line items, joining Product for names."""
-    order = db.query(Order).filter(Order.id == uuid.UUID(order_id)).first()
+    order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 

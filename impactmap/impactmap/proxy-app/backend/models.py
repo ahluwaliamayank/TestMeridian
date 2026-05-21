@@ -24,7 +24,7 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
-    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id         = Column(String(300), primary_key=True, default=uuid.uuid4)
     email      = Column(String(200), nullable=False, unique=True)
     name       = Column(String(200), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
@@ -36,7 +36,7 @@ class User(Base):
 class Product(Base):
     __tablename__ = "products"
 
-    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id          = Column(String(300), primary_key=True, default=uuid.uuid4)
     name        = Column(String(200), nullable=False)
     description = Column(Text)
     price       = Column(Numeric(10, 2), nullable=False)
@@ -53,9 +53,9 @@ class CartItem(Base):
     __tablename__ = "cart_items"
     __table_args__ = (UniqueConstraint("user_id", "product_id"),)
 
-    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id    = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    id         = Column(String(300), primary_key=True, default=uuid.uuid4)
+    user_id    = Column(String(300), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(String(300), ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
     quantity   = Column(Integer, nullable=False, default=1)
     added_at   = Column(DateTime, server_default=func.now())
 
@@ -66,8 +66,8 @@ class CartItem(Base):
 class Order(Base):
     __tablename__ = "orders"
 
-    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id       = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    id            = Column(String(300), primary_key=True, default=uuid.uuid4)
+    user_id       = Column(String(300), ForeignKey("users.id"), nullable=False)
     status        = Column(String(50), nullable=False, default="pending")
     total_amount  = Column(Numeric(10, 2), nullable=False)
     shipping_addr = Column(Text)
@@ -80,9 +80,9 @@ class Order(Base):
 class OrderItem(Base):
     __tablename__ = "order_items"
 
-    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    order_id   = Column(UUID(as_uuid=True), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    id         = Column(String(300), primary_key=True, default=uuid.uuid4)
+    order_id   = Column(String(300), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(String(300), ForeignKey("products.id"), nullable=False)
     quantity   = Column(Integer, nullable=False)
     unit_price = Column(Numeric(10, 2), nullable=False)
 
