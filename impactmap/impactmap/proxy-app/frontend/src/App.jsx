@@ -1,5 +1,5 @@
 // src/App.jsx
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, Link } from "react-router-dom";
 import ProductList from "./components/ProductList";
 import Cart from "./components/Cart";
 import Checkout from "./components/Checkout";
@@ -9,10 +9,13 @@ import "./index.css";
 export default function App() {
   return (
     <BrowserRouter>
-      <nav>
-        <Link to="/">Products</Link>
-        <Link to="/cart">Cart</Link>
-        <Link to="/orders">Orders</Link>
+      <nav className="navbar">
+        <Link to="/" className="navbar-logo">ImpactStore</Link>
+        <div className="navbar-links">
+          <NavLink to="/" end>Products</NavLink>
+          <NavLink to="/cart">Cart</NavLink>
+          <NavLink to="/orders">Orders</NavLink>
+        </div>
       </nav>
       <main>
         <Routes>
